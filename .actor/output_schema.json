@@ -1,0 +1,11 @@
+{
+	"actorOutputSchemaVersion": 1,
+	"title": "Output schema of OLX Cars Scraper",
+	"properties": {
+		"results": {
+			"type": "string",
+			"title": "Results",
+			"template": "{{links.apiDefaultDatasetUrl}}/items"
+		}
+	}
+}

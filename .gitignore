@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+storage/
+apify_storage/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# QA test artifacts
+scripts/_*.jsonl
+scripts/qa_*_results.json

@@ -1,0 +1,23 @@
+{
+	"actorSpecification": 1,
+	"name": "olx-cars",
+	"title": "OLX Car Listings Scraper - 6 Countries, JSON Output",
+	"description": "Scrape car and vehicle listings from OLX across Romania, Poland, Bulgaria, Portugal, Ukraine, and Kazakhstan. Get structured JSON: price, make, model, year, mileage, fuel, location, seller, photos. No proxy required.",
+	"version": "1.0",
+	"buildTag": "latest",
+	"meta": {
+		"templateId": "python-scrapy",
+		"generatedBy": "Extractify"
+	},
+	"readme": "./README.md",
+	"changelog": "./CHANGELOG.md",
+	"input": "./input_schema.json",
+	"storages": {
+		"dataset": "./dataset_schema.json",
+		"keyValueStore": "./key_value_store_schema.json"
+	},
+	"output": "./output_schema.json",
+	"dockerfile": "../Dockerfile",
+	"environmentVariables": {},
+	"categories": ["ECOMMERCE"]
+}

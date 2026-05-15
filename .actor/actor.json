@@ -1,0 +1,23 @@
+{
+	"actorSpecification": 1,
+	"name": "olx-cars",
+	"title": "OLX Cars Scraper",
+	"description": "Scrape car listings from OLX across six country domains: Romania (olx.ro), Poland (olx.pl), Bulgaria (olx.bg), Portugal (olx.pt), Ukraine (olx.ua), and Kazakhstan (olx.kz). Returns 50+ fields per listing: price, make, model, year, mileage, fuel type, transmission, seller details, GPS location, and more. Supports structured filters (country, brand, year range, price range) or direct startUrls mode.",
+	"version": "1.0",
+	"buildTag": "latest",
+	"meta": {
+		"templateId": "python-scrapy",
+		"generatedBy": "Extractify"
+	},
+	"readme": "./README.md",
+	"changelog": "./CHANGELOG.md",
+	"input": "./input_schema.json",
+	"storages": {
+		"dataset": "./dataset_schema.json",
+		"keyValueStore": "./key_value_store_schema.json"
+	},
+	"output": "./output_schema.json",
+	"dockerfile": "../Dockerfile",
+	"environmentVariables": {},
+	"categories": ["ECOMMERCE"]
+}

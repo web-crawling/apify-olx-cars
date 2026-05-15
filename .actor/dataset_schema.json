@@ -1,0 +1,289 @@
+{
+	"actorSpecification": 1,
+	"fields": {
+		"type": "object",
+		"properties": {
+			"offerId": {
+				"type": "integer",
+				"description": "OLX internal numeric offer ID (e.g. 303514047)"
+			},
+			"url": {
+				"type": "string",
+				"format": "uri",
+				"description": "Canonical detail URL of the listing"
+			},
+			"country": {
+				"type": "string",
+				"description": "Source country code (ro, pl, bg, pt, ua, kz)"
+			},
+			"title": {
+				"type": "string",
+				"description": "Raw listing title as entered by the seller (free-form)"
+			},
+			"description": {
+				"type": "string",
+				"description": "Listing description with HTML tags stripped; may contain equipment notes, contact info, or condition details"
+			},
+			"price": {
+				"type": "integer",
+				"description": "Seller-listed price amount; null if price not disclosed"
+			},
+			"currency": {
+				"type": "string",
+				"description": "ISO 4217 currency code of the listed price (e.g. EUR, PLN, UAH)"
+			},
+			"priceNegotiable": {
+				"type": "boolean",
+				"description": "True when the seller accepts negotiations (price.type == arranged)"
+			},
+			"pricePrevious": {
+				"type": "integer",
+				"description": "Previous price before a seller-initiated reduction; null if no price change"
+			},
+			"priceConverted": {
+				"type": "integer",
+				"description": "Price converted to the local currency when seller listed in a foreign currency; null if no conversion"
+			},
+			"priceCurrencyConverted": {
+				"type": "string",
+				"description": "Currency code of priceConverted; null if no conversion"
+			},
+			"make": {
+				"type": "string",
+				"description": "Car brand/make resolved from the OLX brand-level category (e.g. BMW, Volkswagen)"
+			},
+			"model": {
+				"type": "string",
+				"description": "Car model from listing params (locale-specific label, e.g. X6, Seria 5)"
+			},
+			"year": {
+				"type": "integer",
+				"description": "Manufacture year as a 4-digit integer (e.g. 2021)"
+			},
+			"mileageKm": {
+				"type": "integer",
+				"description": "Odometer reading normalised to kilometres (UA mileage-in-thousands is multiplied by 1000)"
+			},
+			"fuelType": {
+				"type": "string",
+				"description": "Normalised fuel type: petrol, diesel, electric, hybrid, lpg, or other"
+			},
+			"transmission": {
+				"type": "string",
+				"description": "Normalised transmission type: manual, automatic, semi-automatic, or other"
+			},
+			"bodyType": {
+				"type": "string",
+				"description": "Normalised body style: sedan, suv, hatchback, estate, coupe, convertible, pickup, mpv, or other"
+			},
+			"condition": {
+				"type": "string",
+				"description": "Normalised listing condition: used, new, or damaged"
+			},
+			"engineCapacityCm3": {
+				"type": "integer",
+				"description": "Engine displacement in cm³ (UA litre values are multiplied by 1000)"
+			},
+			"powerHp": {
+				"type": "integer",
+				"description": "Engine power in horsepower/HP (CP/KM/CV units are all treated as equivalent)"
+			},
+			"color": {
+				"type": "string",
+				"description": "Exterior colour as an English slug (e.g. black, white, silver); UA/KZ numeric IDs are resolved via a lookup table"
+			},
+			"vin": {
+				"type": "string",
+				"description": "VIN number when disclosed by the seller (available on PL via vin, UA via vin_number, BG via vinnomer)"
+			},
+			"licensePlate": {
+				"type": "string",
+				"description": "Partially masked licence plate number (PT and UA only)"
+			},
+			"drivetrain": {
+				"type": "string",
+				"description": "Drive type raw slug (PL drive, UA drive_type); null for RO/BG/PT/KZ which do not expose this field"
+			},
+			"steeringWheelSide": {
+				"type": "string",
+				"description": "Steering wheel position: lhd or rhd (RO and PL only)"
+			},
+			"doorCount": {
+				"type": "integer",
+				"description": "Number of doors (RO door_count, BG doors, UA doors_num); null for PL/PT/KZ"
+			},
+			"seatCount": {
+				"type": "integer",
+				"description": "Number of seats (PT nr_seats, BG seats, UA seats_num); null for RO/PL/KZ"
+			},
+			"registrationStatus": {
+				"type": "string",
+				"description": "Registration status: registered or unregistered (RO only)"
+			},
+			"countryOfOrigin": {
+				"type": "string",
+				"description": "Country from which the car was imported (PL country_origin, PT origin, BG import field)"
+			},
+			"customsCleared": {
+				"type": "string",
+				"description": "Whether customs duties have been paid: yes or no (UA cleared_customs field only)"
+			},
+			"ownersCount": {
+				"type": "integer",
+				"description": "Number of previous owners (KZ owners field only)"
+			},
+			"co2Emissions": {
+				"type": "integer",
+				"description": "CO2 emissions in g/km (PT co2_emissions field only)"
+			},
+			"features": {
+				"type": "array",
+				"items": {
+					"type": "string"
+				},
+				"description": "Equipment and feature keys merged from UA/KZ car_option checklist and BG comfort/multimedia/safety/other checklists. Empty array for countries that do not expose a structured feature list (RO, PL, PT)."
+			},
+			"images": {
+				"type": "array",
+				"items": {
+					"type": "string",
+					"format": "uri"
+				},
+				"description": "Photo URLs at 800x600 resolution from the OLX CDN (frankfurt.apollo.olxcdn.com)"
+			},
+			"promotionFlags": {
+				"type": "object",
+				"description": "Paid promotion status from the listing's promotion field",
+				"properties": {
+					"highlighted": {
+						"type": "boolean",
+						"description": "Whether the listing is highlighted (paid feature)"
+					},
+					"topAd": {
+						"type": "boolean",
+						"description": "Whether the listing is a top ad (paid feature)"
+					},
+					"urgent": {
+						"type": "boolean",
+						"description": "Whether the listing is marked urgent (paid feature)"
+					}
+				}
+			},
+			"postedAt": {
+				"type": "string",
+				"description": "ISO 8601 timestamp when the listing was first posted (created_time)"
+			},
+			"refreshedAt": {
+				"type": "string",
+				"description": "ISO 8601 timestamp of the last seller-triggered bump (last_refresh_time)"
+			},
+			"validTo": {
+				"type": "string",
+				"description": "ISO 8601 timestamp when the listing expires (valid_to_time)"
+			},
+			"scrapedAt": {
+				"type": "string",
+				"description": "ISO 8601 UTC timestamp when this record was scraped"
+			},
+			"paramsRaw": {
+				"type": "array",
+				"items": {
+					"type": "object"
+				},
+				"description": "Full raw params array from the OLX API offer object. Pass-through for country-specific fields not surfaced by the normalised schema. Always present (empty array when params absent)."
+			},
+			"seller": {
+				"type": "object",
+				"description": "Seller profile information",
+				"properties": {
+					"id": {
+						"type": "integer",
+						"description": "OLX internal user ID"
+					},
+					"uuid": {
+						"type": "string",
+						"description": "Opaque seller UUID for cross-listing deduplication"
+					},
+					"name": {
+						"type": "string",
+						"description": "Display name (first name for private sellers)"
+					},
+					"companyName": {
+						"type": "string",
+						"description": "Dealer company name; null for private sellers"
+					},
+					"type": {
+						"type": "string",
+						"description": "Seller type: private (business=false) or dealer (business=true)"
+					},
+					"memberSince": {
+						"type": "string",
+						"description": "ISO 8601 account creation date"
+					},
+					"hasPhone": {
+						"type": "boolean",
+						"description": "Whether the seller accepts phone contact (contact.phone bool). Actual phone number is not extracted."
+					},
+					"hasChat": {
+						"type": "boolean",
+						"description": "Whether OLX in-app chat is enabled for this seller"
+					}
+				}
+			},
+			"location": {
+				"type": "object",
+				"description": "Geographic location of the listing",
+				"properties": {
+					"city": {
+						"type": "string",
+						"description": "City name in local language"
+					},
+					"region": {
+						"type": "string",
+						"description": "Region, county, or voivodeship name"
+					},
+					"district": {
+						"type": "string",
+						"description": "District name (present for PL and UA; absent for other countries)"
+					},
+					"latitude": {
+						"type": "number",
+						"description": "Approximate GPS latitude; may be obfuscated to neighbourhood centroid when gpsObfuscated is true"
+					},
+					"longitude": {
+						"type": "number",
+						"description": "Approximate GPS longitude; may be obfuscated to neighbourhood centroid when gpsObfuscated is true"
+					},
+					"gpsObfuscated": {
+						"type": "boolean",
+						"description": "True when map.show_detailed is false, meaning coordinates are snapped to a neighbourhood centroid rather than the exact address"
+					}
+				}
+			}
+		}
+	},
+	"views": {
+		"listings": {
+			"title": "Car Listings",
+			"description": "All scraped car listings with key details",
+			"display": {
+				"component": "table",
+				"properties": {
+					"make": { "label": "Make" },
+					"model": { "label": "Model" },
+					"year": { "label": "Year" },
+					"price": { "label": "Price" },
+					"currency": { "label": "Currency" },
+					"mileageKm": { "label": "Mileage (km)" },
+					"fuelType": { "label": "Fuel" },
+					"transmission": { "label": "Transmission" },
+					"bodyType": { "label": "Body Type" },
+					"condition": { "label": "Condition" },
+					"country": { "label": "Country" },
+					"title": { "label": "Title" },
+					"url": { "label": "URL" }
+				}
+			}
+		}
+	}
+}

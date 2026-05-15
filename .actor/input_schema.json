@@ -1,0 +1,103 @@
+{
+	"title": "OLX Cars Scraper Input",
+	"description": "Scrape car listings from OLX across Romania, Poland, Bulgaria, Portugal, Ukraine, and Kazakhstan. Provide startUrls for direct scraping or use structured filters to query by country, brand, year, and price.",
+	"type": "object",
+	"schemaVersion": 1,
+	"properties": {
+		"startUrls": {
+			"title": "Start URLs",
+			"type": "array",
+			"editor": "requestListSources",
+			"description": "OLX car listing or search result URLs to scrape directly. When provided, structured filters (country, brands, yearFrom, yearTo, priceFrom, priceTo, query) are ignored — only maxItems and sortBy apply. Country is auto-inferred from the URL domain. Accepts any OLX car search or category URL.",
+			"sectionCaption": "Input Mode",
+			"sectionDescription": "Provide either URLs (startUrls) OR structured filters below. URLs take priority.",
+			"prefill": [
+				{ "url": "https://www.olx.ro/auto-masini-moto-ambarcatiuni/autoturisme/" }
+			]
+		},
+		"country": {
+			"title": "Country",
+			"type": "string",
+			"editor": "select",
+			"enum": ["ro", "pl", "bg", "pt", "ua", "kz"],
+			"enumTitles": ["Romania (olx.ro)", "Poland (olx.pl)", "Bulgaria (olx.bg)", "Portugal (olx.pt)", "Ukraine (olx.ua)", "Kazakhstan (olx.kz)"],
+			"default": "ro",
+			"description": "OLX country domain to scrape. Brazil (BR) is not available in v1 — see actor description. Ignored when startUrls is provided.",
+			"sectionCaption": "Country & Search",
+			"sectionDescription": "Choose target OLX domain and (optionally) brand/keyword filters."
+		},
+		"brands": {
+			"title": "Car Brands",
+			"type": "array",
+			"editor": "stringList",
+			"description": "Car brands to filter by (e.g. BMW, Toyota, Volkswagen). The actor resolves each name to the correct per-country category ID using a bundled brand map — names are case-insensitive. Unrecognised brand names log a warning with a list of available brands for the selected country. Leave empty to scrape all brands. Ignored when startUrls is provided.",
+			"prefill": ["BMW", "Volkswagen"]
+		},
+		"query": {
+			"title": "Keyword Search",
+			"type": "string",
+			"editor": "textfield",
+			"description": "Free-text keyword search query (maps to the OLX ?query= parameter). Combined with other structured filters. Leave empty to skip keyword filtering. Ignored when startUrls is provided."
+		},
+		"yearFrom": {
+			"title": "Year From",
+			"type": "integer",
+			"editor": "number",
+			"description": "Minimum manufacture year (inclusive). Maps to filter_float_year:from. Valid range: 1900–2099. Ignored when startUrls is provided.",
+			"minimum": 1900,
+			"maximum": 2099,
+			"sectionCaption": "Filters",
+			"sectionDescription": "Year, price, and currency filters (applied when startUrls is not set)."
+		},
+		"yearTo": {
+			"title": "Year To",
+			"type": "integer",
+			"editor": "number",
+			"description": "Maximum manufacture year (inclusive). Maps to filter_float_year:to. Valid range: 1900–2099. Ignored when startUrls is provided.",
+			"minimum": 1900,
+			"maximum": 2099
+		},
+		"priceFrom": {
+			"title": "Price From",
+			"type": "integer",
+			"editor": "number",
+			"description": "Minimum price (inclusive) in the selected priceCurrency. Maps to filter_float_price:from. Ignored when startUrls is provided.",
+			"minimum": 0
+		},
+		"priceTo": {
+			"title": "Price To",
+			"type": "integer",
+			"editor": "number",
+			"description": "Maximum price (inclusive) in the selected priceCurrency. Maps to filter_float_price:to. Ignored when startUrls is provided.",
+			"minimum": 0
+		},
+		"priceCurrency": {
+			"title": "Price Currency",
+			"type": "string",
+			"editor": "select",
+			"enum": ["EUR", "RON", "PLN", "UAH", "USD", "BGN", "KZT"],
+			"enumTitles": ["EUR — Euro", "RON — Romanian Leu", "PLN — Polish Zloty", "UAH — Ukrainian Hryvnia", "USD — US Dollar", "BGN — Bulgarian Lev", "KZT — Kazakhstani Tenge"],
+			"default": "EUR",
+			"description": "Currency for priceFrom/priceTo filters. Must match the listing currency on OLX for the filter to apply. EUR is the most interoperable choice across all supported countries. Ignored when startUrls is provided."
+		},
+		"sortBy": {
+			"title": "Sort Order",
+			"type": "string",
+			"editor": "select",
+			"enum": ["created_at:desc", "filter_float_price:asc", "filter_float_price:desc", "relevance"],
+			"enumTitles": ["Newest first", "Price: low to high", "Price: high to low", "Most relevant"],
+			"default": "created_at:desc",
+			"description": "Sort order for results. Applies in both structured-filter mode and startUrls mode.",
+			"sectionCaption": "Settings"
+		},
+		"maxItems": {
+			"title": "Max Items",
+			"type": "integer",
+			"editor": "number",
+			"description": "Maximum number of car listings to return. The OLX API caps any single unfiltered query at 1,000 results. When maxItems exceeds 1,000, the actor automatically slices by brand and year range to maximise coverage — this significantly increases run time and compute cost.",
+			"default": 1000,
+			"minimum": 1,
+			"prefill": 1000
+		}
+	}
+}

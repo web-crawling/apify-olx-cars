@@ -36,7 +36,14 @@ settings.setmodule("src.settings")
 settings.set("INPUT_DATA", input_data, priority="spider")
 settings.set("FEEDS", {out_file: {"format": "jsonlines", "overwrite": True}}, priority="spider")
 settings.set("LOG_LEVEL", "WARNING")
-settings.set("ITEM_PIPELINES", {"src.pipelines.MaxItemsPipeline": 100}, priority="spider")
+settings.set(
+    "ITEM_PIPELINES",
+    {
+        "src.pipelines.MaxItemsPipeline": 100,
+        "src.pipelines.DropNonesPipeline": 500,
+    },
+    priority="spider",
+)
 
 OlxCarsSpider.crawl_failed = False
 

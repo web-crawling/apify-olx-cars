@@ -197,6 +197,27 @@
 				"type": "string",
 				"description": "ISO 8601 UTC timestamp when this listing was last observed in results. Updated on every run where the listing is present (including UNCHANGED and UPDATED). Not updated for MISSING items. Only present when incrementalMode is true."
 			},
+			"priceHistory": {
+				"type": "array",
+				"description": "Price history for this offer (incrementalMode only). Each entry records the price and currency at the time of a change. Entries are appended only when price or currency changes; unchanged runs do not add entries. Capped at 50 entries (oldest removed first).",
+				"items": {
+					"type": "object",
+					"properties": {
+						"seenAt": {
+							"type": "string",
+							"description": "ISO 8601 UTC timestamp when this price was observed"
+						},
+						"price": {
+							"type": "integer",
+							"description": "Seller-listed price at this observation; null if undisclosed"
+						},
+						"currency": {
+							"type": "string",
+							"description": "ISO 4217 currency code of the price at this observation"
+						}
+					}
+				}
+			},
 			"paramsRaw": {
 				"type": "array",
 				"items": {

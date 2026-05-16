@@ -271,6 +271,7 @@ Every output item is a JSON object. All fields are always present -- fields with
 | `changeType` | string | YES | Change lifecycle status. Only present when `incrementalMode: true`. Values: `NEW`, `UPDATED`, `UNCHANGED`, `REAPPEARED`, `MISSING`. |
 | `firstSeenAt` | string | YES | ISO 8601 UTC. Set once on first observation; immutable. Only present when `incrementalMode: true`. |
 | `lastSeenAt` | string | YES | ISO 8601 UTC. Updated each run the listing is present. Not updated for MISSING items. Only present when `incrementalMode: true`. |
+| `priceHistory` | array[object] | YES | Per-listing price observations across runs. Only present when `incrementalMode: true`. See Price history section below. |
 
 ## Use Cases
 
@@ -374,6 +375,47 @@ Keep names short and readable -- you will see them in the Apify key-value store 
 **Resetting the baseline.** To discard the existing snapshot and start fresh, change `stateKey` to a new name (e.g. append `-v2`). The next run treats the new key as a cold start and builds a fresh baseline. The old key remains in the KV store and can be deleted manually if no longer needed.
 
 **Do not share keys across unrelated actor runs.** All keys for this actor live in the same named key-value store (`olx-cars-incremental-state`). Reusing a key across runs with different filter parameters (e.g. different `country` or `brands`) will corrupt the baseline and produce misleading change signals.
+
+### Price history
+
+Track price changes over time per listing for arbitrage, dealer-monitoring, and price-watch workflows. When `incrementalMode: true`, each output item includes a `priceHistory` array recording the raw seller price at each change event across runs.
+
+**Element shape:**
+
+| Sub-field | Type | Description |
+|-----------|------|-------------|
+| `seenAt` | string (ISO 8601) | UTC timestamp when this price was observed (whole-run timestamp, matching `lastSeenAt` precision) |
+| `price` | integer | Seller-listed price amount; omitted if undisclosed |
+| `currency` | string | ISO 4217 currency code |
+
+**Example:**
+
+```json
+"priceHistory": [
+  {"seenAt": "2026-05-01T08:00:00+00:00", "price": 12500, "currency": "EUR"},
+  {"seenAt": "2026-05-10T08:00:00+00:00", "price": 12000, "currency": "EUR"}
+]
+```
+
+**Append rule:** a new entry is appended only when `price` or `currency` changes compared to the previous entry. The `priceNegotiable` flag does not trigger an append -- it is seller intent metadata, not a price event. When price is unchanged between runs, no duplicate entry is added.
+
+**Raw price only:** `priceHistory` stores the seller's listed `price` and `currency`, never `priceConverted` or `priceCurrencyConverted`. FX rate fluctuations would otherwise create apparent price-change events on every run even when the seller's ask is unchanged.
+
+**Cap:** the array is capped at 50 entries. When the 51st entry would be added, the oldest entry is evicted (FIFO).
+
+**Behaviour by changeType:**
+
+| `changeType` | `priceHistory` behaviour |
+|--------------|--------------------------|
+| `NEW` | Single entry seeded at first observation. Item is suppressed on the first (cold-start) run, but the snapshot is seeded so day-2 runs show full history. |
+| `UPDATED` | New entry appended (price or currency changed). Full history emitted. |
+| `UNCHANGED` | No new entry appended. Full history emitted as-is (only visible when `emitUnchanged: true`). |
+| `REAPPEARED` | New entry appended if price/currency differs from the prior snapshot. Full history emitted. |
+| `MISSING` | No new entry appended. Full history from snapshot emitted (only visible when `emitMissing: true`). |
+
+**Cold-start and legacy snapshots:** on the first run with a given `stateKey`, `priceHistory` is seeded in the snapshot but the item is suppressed (standard incremental cold-start behaviour). For snapshots created before this feature was deployed, the first post-deploy run seeds a single history entry from the stored price and timestamp -- no data wipe required.
+
+**Practical scale guidance:** each history entry is approximately 60 bytes. At 50 entries per offer and 1,000 tracked offers, the snapshot grows by approximately 3 MB. The Apify key-value store supports up to 9 MB per key. For stateKeys tracking up to about 3,000 offers, the 50-entry cap keeps the snapshot within limits. If you are monitoring a larger query, split it across multiple `stateKey` values. A toggle to disable price history for large-scale use cases is on the v2 roadmap.
 
 ### Cost savings
 

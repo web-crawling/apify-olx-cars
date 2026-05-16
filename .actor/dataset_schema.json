@@ -185,6 +185,18 @@
 				"type": "string",
 				"description": "ISO 8601 UTC timestamp when this record was scraped"
 			},
+			"changeType": {
+				"type": "string",
+				"description": "Change lifecycle status relative to the previous run's snapshot. Values: NEW (first time seen), UPDATED (one of 5 tracked fields changed), UNCHANGED (identical to snapshot), REAPPEARED (was MISSING in prior run; back in results), MISSING (was in snapshot; absent from current results). Only present when incrementalMode is true."
+			},
+			"firstSeenAt": {
+				"type": "string",
+				"description": "ISO 8601 UTC timestamp when this listing was first observed (changeType: NEW). Immutable after initial set. Only present when incrementalMode is true."
+			},
+			"lastSeenAt": {
+				"type": "string",
+				"description": "ISO 8601 UTC timestamp when this listing was last observed in results. Updated on every run where the listing is present (including UNCHANGED and UPDATED). Not updated for MISSING items. Only present when incrementalMode is true."
+			},
 			"paramsRaw": {
 				"type": "array",
 				"items": {
@@ -281,7 +293,8 @@
 					"condition": { "label": "Condition" },
 					"country": { "label": "Country" },
 					"title": { "label": "Title" },
-					"url": { "label": "URL" }
+					"url": { "label": "URL" },
+					"changeType": { "label": "Change Type" }
 				}
 			}
 		}

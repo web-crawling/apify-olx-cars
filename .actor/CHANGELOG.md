@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.0 — 2026-05-16
+
+### Added
+- **Incremental monitoring mode** — enable change tracking across runs via the new `incrementalMode` toggle. When enabled, each run compares scraped listings against a persisted snapshot (key-value store, configurable via `stateKey`) and emits per-item `changeType` (NEW / UPDATED / UNCHANGED / REAPPEARED / MISSING) plus `firstSeenAt` / `lastSeenAt` timestamps. The first run with incremental mode silently builds the baseline (0 items emitted). Subsequent runs emit only new and changed listings by default, dramatically reducing output size and cost for ongoing monitoring use cases.
+- New input fields: `incrementalMode`, `stateKey`, `emitUnchanged`, `emitMissing`.
+- New output fields (only present when `incrementalMode: true`): `changeType`, `firstSeenAt`, `lastSeenAt`.
+
 ## [1.0] - 2026-05-15
 
 ### Added

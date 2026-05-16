@@ -40,6 +40,7 @@ settings.set(
     "ITEM_PIPELINES",
     {
         "src.pipelines.MaxItemsPipeline": 100,
+        "src.pipelines.IncrementalDiffPipeline": 200,
         "src.pipelines.DropNonesPipeline": 500,
     },
     priority="spider",

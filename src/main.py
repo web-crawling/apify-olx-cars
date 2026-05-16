@@ -100,12 +100,18 @@ async def main() -> None:
         snapshot: dict = {}
         kv_store = None
         if incremental_mode:
-            from .state import load_snapshot
-            kv_store = await Actor.open_key_value_store()
+            from .state import INCREMENTAL_STORE_NAME, load_snapshot
+            # IMPORTANT: open a NAMED key-value store. Without `name=...`,
+            # Actor.open_key_value_store() returns the per-run default store,
+            # which is unique to each run — state would never persist across
+            # runs. The named store is created on first use and persists for
+            # the actor's lifetime.
+            kv_store = await Actor.open_key_value_store(name=INCREMENTAL_STORE_NAME)
             snapshot = await load_snapshot(kv_store, state_key)
             Actor.log.info(
-                'Incremental mode: loaded %d entries from state key %r.',
-                len(snapshot), state_key,
+                'Incremental mode: loaded %d entries from state key %r '
+                '(named store %r).',
+                len(snapshot), state_key, INCREMENTAL_STORE_NAME,
             )
 
         # Pass all actor input to the spider via the INPUT_DATA setting.

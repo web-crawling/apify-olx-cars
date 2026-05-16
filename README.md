@@ -360,7 +360,7 @@ Do not set `incrementalMode: true` in the actor's `exampleRunInput` -- Apify's a
 
 ### State key guidance
 
-The `stateKey` parameter names the Apify key-value store entry where the snapshot is persisted between runs. The default is `"olx-cars-state"`.
+The `stateKey` parameter names the entry inside a persistent Apify key-value store (named `olx-cars-incremental-state`) where the snapshot is held between runs. The default key is `"olx-cars-state"`.
 
 **One key per monitoring job.** A monitoring job is a specific combination of country, brand/query, and any other filters that you run on a schedule. If you track Romanian BMWs separately from Portuguese Volkswagens, use two different keys -- they must not share a snapshot.
 
@@ -373,7 +373,7 @@ Keep names short and readable -- you will see them in the Apify key-value store 
 
 **Resetting the baseline.** To discard the existing snapshot and start fresh, change `stateKey` to a new name (e.g. append `-v2`). The next run treats the new key as a cold start and builds a fresh baseline. The old key remains in the KV store and can be deleted manually if no longer needed.
 
-**Do not share keys across unrelated actor runs.** All keys for this actor share the same Apify default key-value store. Reusing a key across runs with different filter parameters (e.g. different `country` or `brands`) will corrupt the baseline and produce misleading change signals.
+**Do not share keys across unrelated actor runs.** All keys for this actor live in the same named key-value store (`olx-cars-incremental-state`). Reusing a key across runs with different filter parameters (e.g. different `country` or `brands`) will corrupt the baseline and produce misleading change signals.
 
 ### Cost savings
 

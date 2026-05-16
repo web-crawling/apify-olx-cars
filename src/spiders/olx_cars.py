@@ -116,21 +116,61 @@ PRICE_BANDS = [
 PAGE_LIMIT = 50
 
 
-def _load_brand_categories() -> dict[str, dict[str, int]]:
-    """Load brand→category_id map from bundled JSON file."""
+def _load_brand_categories() -> dict[str, dict[str, dict[str, object]]]:
+    """Load brand→{id, label} map from bundled JSON file.
+
+    Accepts two on-disk formats per entry for backward compatibility:
+      - new: ``{"bmw": {"id": 183, "label": "BMW"}}``
+      - old: ``{"bmw": 183}`` (label falls back to the title-cased key)
+
+    Output is always normalised to the new format.
+    """
     data_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
     path = os.path.normpath(os.path.join(data_dir, 'brand_categories.json'))
     try:
         with open(path, encoding='utf-8') as fh:
-            data = json.load(fh)
-        # Strip internal comment keys
-        return {k: v for k, v in data.items() if not k.startswith('_')}
+            raw = json.load(fh)
     except FileNotFoundError:
         logger.error('brand_categories.json not found at %s', path)
         return {}
     except Exception as exc:
         logger.error('Failed to load brand_categories.json: %s', exc)
         return {}
+
+    out: dict[str, dict[str, dict[str, object]]] = {}
+    for country, country_map in raw.items():
+        if country.startswith('_') or not isinstance(country_map, dict):
+            continue
+        normalised: dict[str, dict[str, object]] = {}
+        for brand_key, entry in country_map.items():
+            if isinstance(entry, dict):
+                cid = entry.get('id')
+                label = entry.get('label') or brand_key.title()
+            else:
+                cid = entry
+                label = brand_key.title()
+            if isinstance(cid, int):
+                normalised[brand_key] = {'id': cid, 'label': str(label)}
+        out[country] = normalised
+    return out
+
+
+def _build_make_lookup(
+    brand_categories: dict[str, dict[str, dict[str, object]]],
+) -> dict[str, dict[int, str]]:
+    """Build per-country reverse map ``{cat_id: brand_label}`` for use
+    as a fallback when ``cat_l2_name`` is None (parent-cat queries; #40).
+    """
+    out: dict[str, dict[int, str]] = {}
+    for country, country_map in brand_categories.items():
+        rev: dict[int, str] = {}
+        for entry in country_map.values():
+            cid = entry.get('id') if isinstance(entry, dict) else None
+            label = entry.get('label') if isinstance(entry, dict) else None
+            if isinstance(cid, int) and isinstance(label, str) and label:
+                rev[cid] = label
+        out[country] = rev
+    return out
 
 
 def _build_api_headers(country: str) -> dict[str, str]:
@@ -200,6 +240,11 @@ class OlxCarsSpider(scrapy.Spider):
 
         # Track max total_elements seen per category_id for cap detection
         self._total_elements_by_cat: dict[str, int] = {}
+
+        # Load brand maps once; build per-country reverse {cat_id: label}
+        # for the make-fallback path used when cat_l2_name is None (#40).
+        self._brand_categories = _load_brand_categories()
+        self._make_lookup = _build_make_lookup(self._brand_categories)
 
         logger.info('OlxCarsSpider initialised.')
 
@@ -302,16 +347,16 @@ class OlxCarsSpider(scrapy.Spider):
         # Mode B: Structured filters
         # -------------------------------------------------------------------
         domain = COUNTRY_DOMAIN[country]
-        brand_categories = _load_brand_categories()
-        country_brand_map: dict[str, int] = brand_categories.get(country) or {}
+        country_brand_map: dict[str, dict[str, object]] = self._brand_categories.get(country) or {}
 
         # Resolve brand names to category_ids
         if brands_raw:
             category_ids: list[int] = []
             for brand_name in brands_raw:
                 key = brand_name.strip().lower()
-                cat_id = country_brand_map.get(key)
-                if cat_id is not None:
+                entry = country_brand_map.get(key)
+                cat_id = entry.get('id') if isinstance(entry, dict) else None
+                if isinstance(cat_id, int):
                     category_ids.append(cat_id)
                 else:
                     available = ', '.join(sorted(country_brand_map.keys())) or '(none yet — run build_brand_categories.py)'
@@ -337,7 +382,10 @@ class OlxCarsSpider(scrapy.Spider):
         else:
             # Full-enumeration mode: iterate all known brand-leaf categories
             if country_brand_map:
-                category_ids = list(set(country_brand_map.values()))
+                category_ids = sorted({
+                    entry['id'] for entry in country_brand_map.values()
+                    if isinstance(entry, dict) and isinstance(entry.get('id'), int)
+                })
                 logger.info(
                     'Full-enumeration mode: %d brand categories for %r.',
                     len(category_ids), country,
@@ -757,7 +805,22 @@ class OlxCarsSpider(scrapy.Spider):
         loader.add_value('priceCurrencyConverted', price_param.get('converted_currency'))
 
         # ---- Make / Model --------------------------------------------------
-        loader.add_value('make', cat_l2_name)
+        # `cat_l2_name` is the slice-level brand label captured from the API
+        # response metadata at offset=0. For brand-leaf cat queries (e.g.
+        # cat=183 = BMW) the API populates it; for parent-cat queries (e.g.
+        # cat=84 = parent cars cat) it is None. In the parent-cat case fall
+        # back to the per-listing `offer.category.id`, which IS the brand-leaf
+        # cat-id, and reverse-look-up its label via the bundled brand map (#40).
+        make_value = cat_l2_name
+        if make_value is None:
+            offer_cat = offer.get('category') or {}
+            try:
+                listing_cat_id = int(offer_cat.get('id'))
+            except (TypeError, ValueError):
+                listing_cat_id = None
+            if listing_cat_id is not None:
+                make_value = self._make_lookup.get(country, {}).get(listing_cat_id)
+        loader.add_value('make', make_value)
         # model: value.label is localised free-form text.
         # key is always 'model' across all six countries per 01-data-points.md.
         model_val = params_by_key.get('model') or {}

@@ -22,6 +22,12 @@ TRACKED_FIELDS = ('price', 'currency', 'condition', 'mileageKm', 'title')
 # Number of consecutive MISSING runs before an entry is purged from the snapshot
 MISSING_PURGE_THRESHOLD = 3
 
+# Name of the persistent (named) Apify KV store used to hold cross-run snapshots.
+# A NAMED store is required — the per-run default store does not persist between
+# runs. Inside this single named store, each user-supplied `stateKey` is its
+# own JSON document, so multiple monitoring jobs can coexist.
+INCREMENTAL_STORE_NAME = 'olx-cars-incremental-state'
+
 
 async def load_snapshot(kv_store, state_key: str) -> dict[str, dict]:
     """Load the snapshot dict from Apify KV store.

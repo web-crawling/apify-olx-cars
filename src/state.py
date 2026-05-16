@@ -28,6 +28,29 @@ MISSING_PURGE_THRESHOLD = 3
 # own JSON document, so multiple monitoring jobs can coexist.
 INCREMENTAL_STORE_NAME = 'olx-cars-incremental-state'
 
+# Maximum number of price history entries retained per offer (FIFO eviction of oldest)
+MAX_PRICE_HISTORY = 50
+
+
+def _append_price_history(
+    history: list,
+    price,
+    currency,
+    seen_at: str,
+) -> list:
+    """Append a new price entry if price or currency changed since last entry.
+
+    Returns the (possibly updated) history list capped to MAX_PRICE_HISTORY.
+    Never mutates the input list — returns a new list.
+    """
+    if history:
+        last = history[-1]
+        if last.get('price') == price and last.get('currency') == currency:
+            return history  # no change — do not append
+    new_entry = {'seenAt': seen_at, 'price': price, 'currency': currency}
+    updated = list(history) + [new_entry]
+    return updated[-MAX_PRICE_HISTORY:]  # FIFO eviction
+
 
 async def load_snapshot(kv_store, state_key: str) -> dict[str, dict]:
     """Load the snapshot dict from Apify KV store.
@@ -96,6 +119,7 @@ def compute_diff(
     if offer_id_str not in snapshot:
         change_type = 'NEW'
         first_seen_at = run_ts
+        prior_history: list = []
     else:
         prior = snapshot[offer_id_str]
         missing_count = prior.get('_missingCount', 0)
@@ -110,7 +134,26 @@ def compute_diff(
             change_type = 'UNCHANGED'
             first_seen_at = prior['firstSeenAt']
 
+        prior_history = prior.get('priceHistory')
+        if not isinstance(prior_history, list):
+            # Defensive: KV entries can be manually edited; non-list values would crash _append_price_history
+            prior_history = []
+        if not prior_history and prior.get('price') is not None:
+            # Legacy snapshot entry without priceHistory — seed from stored price/currency
+            prior_history = [{
+                'seenAt': prior.get('lastSeenAt', run_ts),
+                'price': prior.get('price'),
+                'currency': prior.get('currency'),
+            }]
+
     last_seen_at = run_ts
+
+    new_history = _append_price_history(
+        prior_history,
+        item_dict.get('price'),
+        item_dict.get('currency'),
+        run_ts,
+    )
 
     # Build the new snapshot entry (compact: strip None values, always include timestamps)
     new_entry: dict = {
@@ -125,9 +168,10 @@ def compute_diff(
     }
     # Strip None values for compact storage (timestamps always present so safe)
     new_entry = {k: v for k, v in new_entry.items() if v is not None}
-    # Timestamps are always present — re-ensure they survive the None-strip
+    # Timestamps and priceHistory always survive the None-strip (list is never None)
     new_entry['firstSeenAt'] = first_seen_at
     new_entry['lastSeenAt'] = last_seen_at
+    new_entry['priceHistory'] = new_history
 
     return change_type, first_seen_at, last_seen_at, new_entry
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0 — 2026-05-16
+
+### Added
+- **Price history tracking** — when `incrementalMode: true`, each output item now includes a `priceHistory` array recording the seller's raw price and currency at each change event across runs. A new entry is appended only when `price` or `currency` changes; the `priceNegotiable` flag does not trigger an append. The array is capped at 50 entries (FIFO eviction). Legacy snapshots are migrated automatically on the first post-deploy run — no data wipe required.
+- New output field (only present when `incrementalMode: true`): `priceHistory` (array of `{seenAt, price, currency}` objects).
+
 ## v0.2.0 — 2026-05-16
 
 ### Added

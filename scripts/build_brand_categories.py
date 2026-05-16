@@ -33,9 +33,10 @@ The script writes the JSON incrementally — after each successful brand
 discovery — so an interrupted run loses at most one in-flight probe.
 
 Notes:
-  - RO and PL share taxonomy; when ``--countries`` includes ``ro``, the
-    discovered RO map is copied to PL. When ``ro`` is NOT in the
-    selected countries, the existing PL map is preserved untouched.
+  - RO and PL share the parent cars category id (84) and most legacy
+    brand cat-ids (181-208), but newer brand-leaf cat-ids diverge
+    (e.g. Dacia is 742 on olx.ro, 1347 on olx.pl). PL is discovered
+    standalone — do NOT copy the RO map to PL.
   - This script replaces an earlier range-scan approach that hardcoded
     per-country category-id ranges. The listing-based discovery here
     works for any country without prior knowledge of where the brand
@@ -73,6 +74,7 @@ ALL_COUNTRIES = ('ro', 'pl', 'bg', 'pt', 'ua', 'kz')
 # derived from listings, not from a hardcoded range.
 PARENT_CAT = {
     'ro': 84,
+    'pl': 84,
     'bg': 1117,
     'pt': 378,
     'ua': 108,
@@ -81,6 +83,7 @@ PARENT_CAT = {
 
 DOMAIN = {
     'ro': 'www.olx.ro',
+    'pl': 'www.olx.pl',
     'bg': 'www.olx.bg',
     'pt': 'www.olx.pt',
     'ua': 'www.olx.ua',
@@ -301,11 +304,7 @@ def main() -> None:
         logger.error('Unknown country codes: %s. Valid: %s', unknown, ALL_COUNTRIES)
         sys.exit(2)
 
-    # PL is derived from RO; if user asks for pl, force ro into the scan list.
     scan_countries = [c for c in requested if c in PARENT_CAT]
-    if 'pl' in requested and 'ro' not in scan_countries:
-        logger.info('--countries includes pl; adding ro (PL inherits RO taxonomy).')
-        scan_countries.insert(0, 'ro')
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.dirname(script_dir)
@@ -328,10 +327,6 @@ def main() -> None:
         )
         if brands:
             result[country] = brands
-
-    if 'ro' in scan_countries and result.get('ro'):
-        result['pl'] = dict(result['ro'])
-        logger.info('Copied RO brand map to PL (%d brands).', len(result['pl']))
 
     _write_json(output_path, result)
     logger.info('Written %s', output_path)

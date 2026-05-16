@@ -77,3 +77,8 @@ class CarItem(scrapy.Item):
     # --- Nested objects (TakeFirst() of a dict) --------------------------------
     seller = scrapy.Field()                # dict: seller profile sub-object
     location = scrapy.Field()              # dict: geographic location sub-object
+
+    # --- Incremental change tracking (incrementalMode only) -------------------
+    changeType = scrapy.Field()    # str|None: NEW/UPDATED/UNCHANGED/REAPPEARED/MISSING
+    firstSeenAt = scrapy.Field()   # str|None: ISO 8601 UTC — when listing first entered state
+    lastSeenAt = scrapy.Field()    # str|None: ISO 8601 UTC — when listing last seen in results

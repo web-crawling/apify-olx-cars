@@ -75,6 +75,11 @@ RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429]
 
 ITEM_PIPELINES = {
     'src.pipelines.MaxItemsPipeline': 100,
+    # IncrementalDiffPipeline must run AFTER MaxItemsPipeline (so only items
+    # that passed the ceiling are tracked) and BEFORE DropNonesPipeline (so
+    # we compare the original item values including Nones, avoiding spurious
+    # UPDATED signals when a None field becomes absent after the None-strip).
+    'src.pipelines.IncrementalDiffPipeline': 200,
     # DropNonesPipeline must run BEFORE the Apify dataset push pipeline
     # (registered by apply_apify_settings() at priority 1000), so its
     # priority is set between 100 and 1000.

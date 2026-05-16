@@ -116,8 +116,12 @@ def run_scenario(scenario: dict, out_file: str) -> dict:
     settings.set("INPUT_DATA", input_data, priority="spider")
     settings.set("FEEDS", {out_file: {"format": "jsonlines", "overwrite": True}}, priority="spider")
     settings.set("LOG_LEVEL", "WARNING")
-    # Disable Apify pipeline
-    settings.set("ITEM_PIPELINES", {"src.pipelines.MaxItemsPipeline": 100}, priority="spider")
+    # Disable Apify pipeline — match production chain (minus the Apify push at 1000)
+    settings.set("ITEM_PIPELINES", {
+        "src.pipelines.MaxItemsPipeline": 100,
+        "src.pipelines.IncrementalDiffPipeline": 200,
+        "src.pipelines.DropNonesPipeline": 500,
+    }, priority="spider")
 
     # Reset class-level failed flag
     OlxCarsSpider.crawl_failed = False

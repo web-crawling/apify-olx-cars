@@ -24,6 +24,7 @@ The OLX Car Listings Scraper extracts vehicle classifieds from six OLX country s
 - **Normalised vehicle specs** -- `fuelType`, `transmission`, `bodyType`, and `condition` are mapped to consistent English enums across all six countries despite regional API vocabulary differences.
 - **50 output fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through.
 - **No proxy required** -- direct datacenter access to OLX's public API.
+- **Incremental monitoring mode** -- opt-in change tracking across runs; emit only new, updated, or missing listings instead of the full dataset every time.
 
 ## Supported Countries
 
@@ -120,6 +121,10 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 | `priceCurrency` | enum | NO | `"EUR"` | `EUR, RON, PLN, UAH, USD, BGN, KZT` |
 | `sortBy` | enum | NO | `"created_at:desc"` | `created_at:desc, filter_float_price:asc, filter_float_price:desc, relevance` |
 | `maxItems` | integer | NO | `1000` | Hard ceiling. OLX caps single queries at 1,000; `> 1000` triggers auto brand x year x price slicing |
+| `incrementalMode` | boolean | NO | `false` | Enable change tracking across runs. See Incremental Monitoring section. |
+| `stateKey` | string | NO | `"olx-cars-state"` | KV store key for the snapshot. Use a unique key per monitoring job. |
+| `emitUnchanged` | boolean | NO | `false` | Also emit listings with no tracked-field changes (`changeType: UNCHANGED`). |
+| `emitMissing` | boolean | NO | `false` | Emit listings absent from current results (`changeType: MISSING`). Auto-suppressed when `maxItems` truncates the run. |
 
 **Input mode precedence:** `startUrls` wins when provided. All structured filters (`country`, `brands`, `query`, `yearFrom`, `yearTo`, `priceFrom`, `priceTo`, `priceCurrency`) are ignored when `startUrls` is set. Only `maxItems` and `sortBy` apply alongside `startUrls`. A warning is logged if structured filters are set alongside `startUrls`.
 
@@ -263,6 +268,9 @@ Every output item is a JSON object. All fields are always present -- fields with
 | `location.latitude` | float | YES | Approximate GPS latitude |
 | `location.longitude` | float | YES | Approximate GPS longitude |
 | `location.gpsObfuscated` | boolean | NO | `true` when coordinates are neighbourhood centroid, not exact |
+| `changeType` | string | YES | Change lifecycle status. Only present when `incrementalMode: true`. Values: `NEW`, `UPDATED`, `UNCHANGED`, `REAPPEARED`, `MISSING`. |
+| `firstSeenAt` | string | YES | ISO 8601 UTC. Set once on first observation; immutable. Only present when `incrementalMode: true`. |
+| `lastSeenAt` | string | YES | ISO 8601 UTC. Updated each run the listing is present. Not updated for MISSING items. Only present when `incrementalMode: true`. |
 
 ## Use Cases
 
@@ -295,6 +303,122 @@ Use the JSON dataset directly as a training or RAG source for automotive chatbot
 The actor uses a **pay-per-result** model: **$0.001 per listing** (approximately $1 per 1,000 items). You pay only for Apify compute -- no proxy subscription is required. A typical run retrieving 1,000 listings costs approximately $1.00 in compute; a full enumeration run (multiple brand x year slices, 5,000+ listings) costs proportionally more depending on the number of slices required.
 
 For current Apify compute pricing, see [Apify Pricing](https://apify.com/pricing).
+
+## Incremental Monitoring
+
+Incremental monitoring is an opt-in feature that tracks listing changes across runs. Instead of emitting the full dataset on every run, the actor compares each scraped listing against a persisted snapshot from the previous run and attaches a `changeType` label. Only new, changed, and (optionally) missing listings are emitted by default, which substantially reduces output volume for ongoing monitoring jobs.
+
+### How to enable
+
+1. Set `incrementalMode: true` in your input.
+2. Optionally set `stateKey` to a name that identifies your monitoring job (recommended -- see State Key Guidance below).
+
+Minimal example:
+
+```json
+{
+  "country": "ro",
+  "brands": ["BMW"],
+  "incrementalMode": true,
+  "stateKey": "olx-cars-ro-bmw"
+}
+```
+
+All other input parameters (`brands`, `yearFrom`, `priceFrom`, etc.) work alongside `incrementalMode` as normal.
+
+### changeType values
+
+| Value | Emitted when | Emitted by default? |
+|-------|-------------|---------------------|
+| `NEW` | `offerId` not present in previous snapshot | Yes |
+| `UPDATED` | In snapshot; at least one of 5 tracked fields changed | Yes |
+| `UNCHANGED` | In snapshot; all tracked fields identical | No -- requires `emitUnchanged: true` |
+| `REAPPEARED` | Was MISSING in the prior run; back in results now | Yes |
+| `MISSING` | In previous snapshot; absent from current results | No -- requires `emitMissing: true` |
+
+When `incrementalMode: false` (the default), `changeType`, `firstSeenAt`, and `lastSeenAt` are absent from output entirely -- not null, simply not present.
+
+### Tracked fields
+
+A listing's `changeType` is set to `UPDATED` when any of the following five fields differ from the stored snapshot value:
+
+- `price` -- the primary monitoring signal
+- `currency` -- price comparison is meaningless if the currency changes
+- `condition` -- a condition change (e.g. `used` to `damaged`) is a high-value signal
+- `mileageKm` -- sellers do update odometer readings when they refresh listings
+- `title` -- a title change with an otherwise-identical listing can indicate a relist or rebrand tactic
+
+`images` is explicitly excluded from change tracking: OLX CDN URLs contain rotating tokens and size parameters that change across API responses even when the underlying photos are unchanged. Tracking image URLs would generate constant false-positive UPDATED records.
+
+These five fields are hardcoded in v1. A configurable `trackedFields` parameter is planned for a future release.
+
+### First run behaviour
+
+> **The first run with `incrementalMode: true` emits 0 items.** This is correct and expected. The actor uses that run to build the baseline snapshot (scraping and storing all matching listings in the Apify key-value store). Subsequent runs compare against this baseline and emit only changes. If your first run shows 0 items in the dataset, check the run log for the message "Incremental mode: baseline built -- N listings stored". That confirms everything worked.
+
+Do not set `incrementalMode: true` in the actor's `exampleRunInput` -- Apify's automated QA will flag 0-item runs as failures. Use `incrementalMode: false` (the default) for the example run input.
+
+### State key guidance
+
+The `stateKey` parameter names the Apify key-value store entry where the snapshot is persisted between runs. The default is `"olx-cars-state"`.
+
+**One key per monitoring job.** A monitoring job is a specific combination of country, brand/query, and any other filters that you run on a schedule. If you track Romanian BMWs separately from Portuguese Volkswagens, use two different keys -- they must not share a snapshot.
+
+**Recommended naming convention:** `olx-cars-{country}-{brand}` -- for example:
+- `olx-cars-ro-bmw` for Romanian BMWs
+- `olx-cars-pt-all` for all Portuguese listings
+- `olx-cars-pl-toyota` for Polish Toyotas
+
+Keep names short and readable -- you will see them in the Apify key-value store UI.
+
+**Resetting the baseline.** To discard the existing snapshot and start fresh, change `stateKey` to a new name (e.g. append `-v2`). The next run treats the new key as a cold start and builds a fresh baseline. The old key remains in the KV store and can be deleted manually if no longer needed.
+
+**Do not share keys across unrelated actor runs.** All keys for this actor share the same Apify default key-value store. Reusing a key across runs with different filter parameters (e.g. different `country` or `brands`) will corrupt the baseline and produce misleading change signals.
+
+### Cost savings
+
+With incremental mode, output is limited to listings that are genuinely new or changed since the last run. On OLX car markets, daily listing churn is typically 30-50% (new listings posted, old ones sold or expired). In practice, incremental mode reduces output by 60-90% compared to a full re-scrape, depending on how active the market segment is and how frequently you run. Slower-changing queries (niche brands, narrow year ranges) see higher savings.
+
+Note: the actor currently runs on Apify's standard compute rental tier. Per-result pricing savings translate to reduced dataset size but not yet to per-event billing. This may change in a future release.
+
+### Limitations
+
+- **Snapshot size.** Each entry in the state snapshot is approximately 250 bytes. At 10,000 tracked listings the snapshot is ~2.5 MB; at 30,000 entries it approaches the Apify key-value store's 9 MB per-item limit. If you are monitoring a very large query over many months, split it into multiple monitoring jobs with separate `stateKey` values.
+
+- **MISSING purge policy.** A listing that vanishes from results has its internal `_missingCount` incremented on each subsequent run. After 3 consecutive absences, the entry is purged from the snapshot entirely. This prevents indefinite accumulation of gone listings in the snapshot. A listing that reappears before the purge threshold is marked `REAPPEARED` and its counter is reset.
+
+- **Reposted listings appear as NEW.** When a seller removes a listing and reposts the same car with a new OLX offer ID, the actor has no way to detect the link -- the old offer ID goes MISSING and the new one appears as NEW. Cross-run repost detection (matching by vehicle attributes rather than offer ID) is tracked in [issue #21](https://github.com/web-crawling/apify-olx-cars/issues/21).
+
+- **MISSING detection is suppressed when `maxItems` truncates the run.** If the number of results reaches the `maxItems` ceiling during a run, the actor cannot distinguish "listing absent" from "listing not reached due to the cap". In this case, MISSING emission is suppressed for the entire run and a warning is logged. Increase `maxItems` or narrow your filters to avoid truncation if MISSING detection is important to your use case.
+
+### Examples
+
+**Monitor Romanian BMWs and emit price changes only (default behaviour):**
+
+```json
+{
+  "country": "ro",
+  "brands": ["BMW"],
+  "incrementalMode": true,
+  "stateKey": "olx-cars-ro-bmw"
+}
+```
+
+This emits `NEW`, `UPDATED`, and `REAPPEARED` items only. A listing with a changed `price`, `currency`, `condition`, `mileageKm`, or `title` will appear as `UPDATED`.
+
+**Monitor sales -- detect when listings are sold or removed:**
+
+```json
+{
+  "country": "ro",
+  "brands": ["BMW"],
+  "incrementalMode": true,
+  "stateKey": "olx-cars-ro-bmw",
+  "emitMissing": true
+}
+```
+
+Adding `emitMissing: true` causes the actor to also emit items with `changeType: MISSING` for listings that were in the previous snapshot but absent from the current results. On an active market like OLX Romania, expect 30-50% of tracked listings to appear as MISSING per day.
 
 ## Limitations and Known Issues
 
@@ -357,6 +481,9 @@ The actor returns 40-65 listings per API call. Concurrency per domain ranges fro
 
 **Why was Romania chosen as the default country?**
 Romania has the highest car-listing volume among the supported countries and the broadest brand coverage in the initial brand map. EUR pricing is common in RO, making it easy to compare prices across European markets without currency conversion. `"ro"` as the default also means the quickest path to a working first run for most users.
+
+**Why does my first run with incremental mode show 0 items?**
+This is expected. The first run with `incrementalMode: true` builds the baseline snapshot and emits nothing to the dataset. Run the actor a second time with the same `stateKey` and it will emit only listings that are new or changed since the first run. See the Incremental Monitoring section for details.
 
 ## Related Actors
 

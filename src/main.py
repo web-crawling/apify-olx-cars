@@ -17,11 +17,14 @@ CRITICAL — crawl_failed pattern:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from apify import Actor
 from apify.scrapy import apply_apify_settings
 from scrapy.crawler import CrawlerRunner
 from scrapy.utils.defer import deferred_to_future
 
+from .pipelines import IncrementalDiffPipeline
 from .spiders.olx_cars import OlxCarsSpider
 
 
@@ -87,6 +90,24 @@ async def main() -> None:
         # --- Build Scrapy settings ---
         settings = apply_apify_settings()
 
+        # --- Incremental mode setup ---
+        incremental_mode = bool(actor_input.get('incrementalMode', False))
+        state_key_raw = actor_input.get('stateKey') or 'olx-cars-state'
+        state_key = str(state_key_raw).strip() or 'olx-cars-state'
+        emit_missing = bool(actor_input.get('emitMissing', False))
+        run_ts = datetime.now(tz=timezone.utc).isoformat()
+
+        snapshot: dict = {}
+        kv_store = None
+        if incremental_mode:
+            from .state import load_snapshot
+            kv_store = await Actor.open_key_value_store()
+            snapshot = await load_snapshot(kv_store, state_key)
+            Actor.log.info(
+                'Incremental mode: loaded %d entries from state key %r.',
+                len(snapshot), state_key,
+            )
+
         # Pass all actor input to the spider via the INPUT_DATA setting.
         # The spider reads self.settings.get('INPUT_DATA') in start_requests().
         # This avoids passing kwargs through CrawlerRunner.crawl() which does
@@ -105,18 +126,63 @@ async def main() -> None:
                 'priceCurrency': actor_input.get('priceCurrency', 'EUR'),
                 'sortBy': sort_by,
                 'maxItems': max_items,
+                # --- Incremental mode fields ---
+                'incrementalMode': incremental_mode,
+                'stateKey': state_key,
+                'emitUnchanged': bool(actor_input.get('emitUnchanged', False)),
+                'emitMissing': emit_missing,
+                '_snapshot': snapshot,
+                '_runTs': run_ts,
             },
             priority='spider',
         )
 
-        # --- Reset class-level flag before each run ---
+        # --- Reset class-level flags before each run ---
         # (prevents false positives if Actor is somehow re-run in the same process)
         OlxCarsSpider.crawl_failed = False
+        IncrementalDiffPipeline.updated_snapshot = {}
+        IncrementalDiffPipeline.seen_offer_ids = set()
+        IncrementalDiffPipeline.was_truncated = False
 
         # --- Run the spider ---
         crawler_runner = CrawlerRunner(settings)
         crawl_deferred = crawler_runner.crawl(OlxCarsSpider)
         await deferred_to_future(crawl_deferred)
+
+        # --- Post-crawl: incremental state save + MISSING emission ---
+        if incremental_mode and kv_store is not None:
+            from .state import compute_missing, save_snapshot
+
+            updated_snapshot = IncrementalDiffPipeline.updated_snapshot
+            seen_offer_ids = IncrementalDiffPipeline.seen_offer_ids
+            was_truncated = IncrementalDiffPipeline.was_truncated
+
+            # Compute and emit MISSING items (mutates updated_snapshot _missingCount)
+            missing_items = compute_missing(
+                snapshot=updated_snapshot,
+                seen_ids=seen_offer_ids,
+                emit_missing=emit_missing,
+                run_ts=run_ts,
+                was_truncated=was_truncated,
+            )
+            if missing_items:
+                dataset = await Actor.open_dataset()
+                for missing_item in missing_items:
+                    await dataset.push_data(missing_item)
+                Actor.log.info(
+                    'Incremental mode: emitted %d MISSING items.', len(missing_items)
+                )
+
+            # Save updated snapshot back to KV
+            await save_snapshot(kv_store, state_key, updated_snapshot)
+
+            # Log baseline-build-run notice when this was the first run
+            if len(snapshot) == 0:
+                Actor.log.info(
+                    'Incremental mode: baseline built — %d listings stored in '
+                    'state key %r. Next run will emit changes.',
+                    len(updated_snapshot), state_key,
+                )
 
         # --- Check for fatal errors ---
         # CRITICAL: access OlxCarsSpider.crawl_failed as a CLASS attribute.

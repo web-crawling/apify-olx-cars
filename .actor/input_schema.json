@@ -98,6 +98,33 @@
 			"default": 1000,
 			"minimum": 1,
 			"prefill": 1000
+		},
+		"incrementalMode": {
+			"title": "Incremental Mode",
+			"type": "boolean",
+			"default": false,
+			"description": "When enabled, each run compares scraped listings against the previous run's snapshot and labels each item NEW, UPDATED, UNCHANGED, or MISSING. Only new and changed listings are emitted by default — significantly reducing output size and cost for ongoing monitoring. The first run with this enabled builds the baseline; no items are emitted on that run (they are stored silently in the state snapshot). Disable to use standard full-scrape mode.",
+			"sectionCaption": "Incremental Monitoring",
+			"sectionDescription": "Track changes across runs — emit only listings that are new, updated, or missing since the last snapshot. Ideal for price alerts and inventory monitoring."
+		},
+		"stateKey": {
+			"title": "State Key",
+			"type": "string",
+			"editor": "textfield",
+			"default": "olx-cars-state",
+			"description": "Name of the Apify key-value store entry used to persist the listings snapshot between runs. Use a unique key per monitoring job — e.g. 'olx-cars-ro-bmw' for Romanian BMWs, 'olx-cars-pt-all' for all Portuguese listings. Changing this key resets the baseline (next run emits everything as NEW). Only used when Incremental Mode is on."
+		},
+		"emitUnchanged": {
+			"title": "Emit Unchanged",
+			"type": "boolean",
+			"default": false,
+			"description": "Include listings whose tracked fields (price, currency, condition, mileage, title) are identical to the previous run snapshot (changeType: UNCHANGED). Useful if you need a full dataset export alongside change signals. Leave off to minimise output and cost. Only used when Incremental Mode is on."
+		},
+		"emitMissing": {
+			"title": "Emit Missing",
+			"type": "boolean",
+			"default": false,
+			"description": "Emit listings that were in the previous snapshot but absent from the current results (changeType: MISSING). These are likely sold or removed. On active OLX markets, expect 30–50% of tracked listings to appear as MISSING per day. Enable only when you need deletion tracking. Suppressed automatically when the run is capped by maxItems (to avoid false positives). Only used when Incremental Mode is on."
 		}
 	}
 }

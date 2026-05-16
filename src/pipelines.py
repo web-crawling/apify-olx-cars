@@ -5,6 +5,11 @@ Pipelines:
     Raises CloseSpider when the limit is reached, which signals Scrapy to
     shut down cleanly and lets Apify report SUCCEEDED with the items collected.
 
+  IncrementalDiffPipeline — diffs each item against the KV snapshot loaded
+    by main.py, attaches changeType/firstSeenAt/lastSeenAt, deduplicates
+    by offerId within a run, and drops UNCHANGED items when emitUnchanged
+    is False. Pass-through when incrementalMode: false.
+
   DropNonesPipeline — recursively removes None values from items before
     they reach the Apify dataset push pipeline. Apify's dataset schema
     rejects null for typed fields (Draft7 default behavior), so items
@@ -16,6 +21,7 @@ Pipelines:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from itemadapter import ItemAdapter
 from scrapy.exceptions import CloseSpider, DropItem
@@ -65,6 +71,95 @@ def _drop_nones(obj):
     if isinstance(obj, list):
         return [_drop_nones(v) for v in obj]
     return obj
+
+
+class IncrementalDiffPipeline:
+    """Diff each item against the incremental state snapshot.
+
+    When incrementalMode is False, passes items through unchanged.
+    When incrementalMode is True:
+      - Deduplicates by offerId within a single run (first-seen wins)
+      - Computes changeType / firstSeenAt / lastSeenAt via state.compute_diff
+      - Drops UNCHANGED items (unless emitUnchanged: true)
+      - Accumulates updated_snapshot for main.py to write after crawl
+
+    Priority: 200 — after MaxItemsPipeline (100) but before DropNonesPipeline (500).
+    Rationale: must run BEFORE DropNonesPipeline so it can compare item fields that
+    may be None against the snapshot (e.g. mileageKm=None vs prior None — unchanged,
+    not a spurious diff). Running before the None-strip also means we always compare
+    the original item shape accurately.
+    """
+
+    # Class attributes: read by main.py after the crawl completes.
+    # Reset in open_spider() for each run.
+    updated_snapshot: dict = {}
+    seen_offer_ids: set = set()
+    was_truncated: bool = False
+
+    def open_spider(self, spider) -> None:
+        input_data = spider.settings.get('INPUT_DATA') or {}
+        self.incremental_mode = bool(input_data.get('incrementalMode', False))
+        self.emit_unchanged = bool(input_data.get('emitUnchanged', False))
+        self.emit_missing = bool(input_data.get('emitMissing', False))
+        self._max_items = int(input_data.get('maxItems', 1000))
+        # Snapshot loaded by main.py and passed via INPUT_DATA['_snapshot']
+        self._snapshot = dict(input_data.get('_snapshot') or {})
+        self._run_ts = (
+            input_data.get('_runTs')
+            or datetime.now(tz=timezone.utc).isoformat()
+        )
+        # Reset class attributes for this run (start from the loaded snapshot)
+        type(self).updated_snapshot = dict(self._snapshot)
+        type(self).seen_offer_ids = set()
+        type(self).was_truncated = False
+
+    def process_item(self, item, spider):
+        if not self.incremental_mode:
+            return item  # pass-through; no change fields added
+
+        adapter = ItemAdapter(item)
+        item_dict = adapter.asdict()
+        offer_id = item_dict.get('offerId')
+        if offer_id is None:
+            return item  # cannot diff without offerId
+
+        offer_id_str = str(offer_id)
+
+        # Deduplicate within a single run (first-seen wins)
+        if offer_id_str in type(self).seen_offer_ids:
+            raise DropItem(f'Duplicate offerId {offer_id_str} in same run — dropping.')
+        type(self).seen_offer_ids.add(offer_id_str)
+
+        # Compute diff against snapshot
+        from .state import compute_diff
+        change_type, first_seen_at, last_seen_at, new_entry = compute_diff(
+            item_dict, self._snapshot, self._run_ts
+        )
+
+        # Update in-memory snapshot (class attribute so main.py can read it)
+        type(self).updated_snapshot[offer_id_str] = new_entry
+
+        # Drop UNCHANGED unless emitUnchanged was requested
+        if change_type == 'UNCHANGED' and not self.emit_unchanged:
+            raise DropItem(f'offerId {offer_id_str} is UNCHANGED — suppressed.')
+
+        # Attach change fields to item (works for both Scrapy Items and dicts)
+        item['changeType'] = change_type
+        item['firstSeenAt'] = first_seen_at
+        item['lastSeenAt'] = last_seen_at
+
+        return item
+
+    def close_spider(self, spider) -> None:
+        # Detect truncation: if we saw >= maxItems listings, the run was capped.
+        # CloseSpider raised by MaxItemsPipeline shuts down the spider, but
+        # close_spider fires afterwards — we can compare seen count to maxItems.
+        if len(type(self).seen_offer_ids) >= self._max_items:
+            type(self).was_truncated = True
+            spider.logger.warning(
+                'maxItems cap reached — MISSING detection suppressed for this run '
+                'to avoid false positives.'
+            )
 
 
 class DropNonesPipeline:

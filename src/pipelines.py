@@ -139,6 +139,17 @@ class IncrementalDiffPipeline:
         # Update in-memory snapshot (class attribute so main.py can read it)
         type(self).updated_snapshot[offer_id_str] = new_entry
 
+        # Cold-start baseline build: when the loaded snapshot was empty at
+        # open_spider time, suppress all NEW items so the first run silently
+        # initialises state instead of dumping the full dataset. This matches
+        # the approved UX (Gate 1) and the README's "First run behaviour"
+        # callout. Without this, an enabled-but-uninitialised incrementalMode
+        # behaves identically to a non-incremental run on day 1.
+        if change_type == 'NEW' and not self._snapshot:
+            raise DropItem(
+                f'offerId {offer_id_str} is NEW on cold-start baseline build — suppressed.'
+            )
+
         # Drop UNCHANGED unless emitUnchanged was requested
         if change_type == 'UNCHANGED' and not self.emit_unchanged:
             raise DropItem(f'offerId {offer_id_str} is UNCHANGED — suppressed.')

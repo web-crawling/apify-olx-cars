@@ -156,24 +156,23 @@ item_new2 = make_car_item(offerId=10002, price=8000, currency='RON',
 result_n1, drop_n1 = run_pipeline_item(pipeline2, item_new1, spider2)
 result_n2, drop_n2 = run_pipeline_item(pipeline2, item_new2, spider2)
 
-# Both should flow through as NEW (cold start — no snapshot)
-check('cold_start.item1_passed', result_n1 is not None, f'drop={drop_n1}')
-check('cold_start.item2_passed', result_n2 is not None, f'drop={drop_n2}')
+# Cold start: NEW items are SILENTLY DROPPED (baseline build).
+# The snapshot still accumulates so the next run has state to diff against.
+check('cold_start.item1_dropped', result_n1 is None, f'expected DropItem, got {result_n1!r}')
+check('cold_start.item1_is_dropitem', drop_n1 is not None and isinstance(drop_n1, DropItem))
+check('cold_start.item2_dropped', result_n2 is None, f'expected DropItem, got {result_n2!r}')
+check('cold_start.item2_is_dropitem', drop_n2 is not None and isinstance(drop_n2, DropItem))
 
-# changeType must be NEW
-if result_n1 is not None:
-    check('cold_start.item1_changeType_NEW',
-          result_n1.get('changeType') == 'NEW',
-          f"got {result_n1.get('changeType')!r}")
-    check('cold_start.item1_firstSeenAt', result_n1.get('firstSeenAt') == RUN_TS,
-          f"got {result_n1.get('firstSeenAt')!r}")
-    check('cold_start.item1_lastSeenAt', result_n1.get('lastSeenAt') == RUN_TS,
-          f"got {result_n1.get('lastSeenAt')!r}")
-
-# Snapshot should be accumulated (2 entries)
+# Snapshot should still be accumulated (2 entries) — baseline build's job
 check('cold_start.snapshot_has_2', len(IncrementalDiffPipeline.updated_snapshot) == 2,
       f"got {len(IncrementalDiffPipeline.updated_snapshot)}")
 check('cold_start.seen_ids_count', len(IncrementalDiffPipeline.seen_offer_ids) == 2)
+
+# Snapshot entries should have correct shape (firstSeenAt + tracked fields)
+snap_entry_1 = IncrementalDiffPipeline.updated_snapshot.get('10001', {})
+check('cold_start.snap_entry_has_firstSeenAt', snap_entry_1.get('firstSeenAt') == RUN_TS,
+      f"got {snap_entry_1.get('firstSeenAt')!r}")
+check('cold_start.snap_entry_has_price', snap_entry_1.get('price') == 15000)
 
 # Now add an UNCHANGED item (simulate: feed same offerId with same fields again using
 # the updated snapshot as the starting snapshot for next call within same run)
@@ -308,12 +307,20 @@ pipeline3.close_spider(spider3)
 
 print('\n--- Scenario 4: Within-run deduplication ---')
 
+# Pre-populate snapshot so this is NOT cold-start mode — the dedup test wants
+# to verify the second occurrence is dropped, which requires the first one to
+# actually flow through (not be silently suppressed as cold-start baseline).
 input_data_s4 = {
     'incrementalMode': True,
     'emitUnchanged': True,
     'emitMissing': False,
     'maxItems': 1000,
-    '_snapshot': {},
+    '_snapshot': {
+        '99999': {  # unrelated prior entry — makes snapshot non-empty
+            'price': 1, 'currency': 'EUR', 'title': 'Sentinel',
+            'firstSeenAt': RUN_TS, 'lastSeenAt': RUN_TS,
+        },
+    },
     '_runTs': RUN_TS,
 }
 spider4 = MockSpider(input_data_s4)

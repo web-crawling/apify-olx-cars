@@ -160,6 +160,7 @@ class IncrementalDiffPipeline:
         item['lastSeenAt'] = last_seen_at
         offer_entry = type(self).updated_snapshot.get(offer_id_str, {})
         item['priceHistory'] = offer_entry.get('priceHistory', [])
+        item['isRepost'] = (change_type == 'REAPPEARED')
 
         return item
 

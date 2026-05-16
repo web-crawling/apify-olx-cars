@@ -174,6 +174,7 @@ async def main() -> None:
             if missing_items:
                 dataset = await Actor.open_dataset()
                 for missing_item in missing_items:
+                    missing_item['isRepost'] = False
                     await dataset.push_data(missing_item)
                 Actor.log.info(
                     'Incremental mode: emitted %d MISSING items.', len(missing_items)

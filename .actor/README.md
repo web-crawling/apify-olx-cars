@@ -272,6 +272,7 @@ Every output item is a JSON object. All fields are always present -- fields with
 | `firstSeenAt` | string | YES | ISO 8601 UTC. Set once on first observation; immutable. Only present when `incrementalMode: true`. |
 | `lastSeenAt` | string | YES | ISO 8601 UTC. Updated each run the listing is present. Not updated for MISSING items. Only present when `incrementalMode: true`. |
 | `priceHistory` | array[object] | YES | Per-listing price observations across runs. Only present when `incrementalMode: true`. See Price history section below. |
+| `isRepost` | boolean | NO | `true` when `changeType` is `REAPPEARED` (the listing was absent in the prior run and has returned); `false` for all other change types. Only present when `incrementalMode: true`. |
 
 ## Use Cases
 
@@ -416,6 +417,31 @@ Track price changes over time per listing for arbitrage, dealer-monitoring, and 
 **Cold-start and legacy snapshots:** on the first run with a given `stateKey`, `priceHistory` is seeded in the snapshot but the item is suppressed (standard incremental cold-start behaviour). For snapshots created before this feature was deployed, the first post-deploy run seeds a single history entry from the stored price and timestamp -- no data wipe required.
 
 **Practical scale guidance:** each history entry is approximately 60 bytes. At 50 entries per offer and 1,000 tracked offers, the snapshot grows by approximately 3 MB. The Apify key-value store supports up to 9 MB per key. For stateKeys tracking up to about 3,000 offers, the 50-entry cap keeps the snapshot within limits. If you are monitoring a larger query, split it across multiple `stateKey` values. A toggle to disable price history for large-scale use cases is on the v2 roadmap.
+
+### Repost detection
+
+When `incrementalMode: true`, each output item includes an `isRepost` boolean field indicating whether the offer reappeared after a period of absence.
+
+**What it flags:** a seller who removes a listing and reposts the same physical car under the same OLX offer ID (without the offer ID changing) will produce a `changeType: REAPPEARED` event when the offer comes back. `isRepost: true` is set on that item. This is the most common pattern for private sellers gaming OLX's freshness sort by deleting and re-listing.
+
+**Use cases:**
+
+- Filter out artificially fresh listings when building time-on-market studies (exclude `isRepost: true` from "days to sell" calculations).
+- Dealer-competitive analysis: track which competitor listings are genuine new stock vs. recycled inventory.
+
+**Behavior by changeType:**
+
+| `changeType` | `isRepost` |
+|--------------|-----------|
+| `NEW` | `false` |
+| `UPDATED` | `false` |
+| `UNCHANGED` | `false` |
+| `REAPPEARED` | `true` |
+| `MISSING` | `false` |
+
+When `incrementalMode: false`, `isRepost` is absent from output entirely -- not null, simply not present.
+
+**v1 limitation:** if a listing is absent for 3 consecutive runs, its entry is purged from the snapshot (see MISSING purge policy under Limitations below). If the same offer ID then returns after purge, it is classified as `NEW` with `isRepost: false` -- the actor has no record to detect the reappearance. In practice this edge case is rare: genuine relists on OLX almost always receive a new offer ID from OLX's platform, so the original offer ID returning after a purge is uncommon. Cross-offerId content matching (detecting relists by vehicle attributes rather than offer ID) is planned for v2.
 
 ### Cost savings
 

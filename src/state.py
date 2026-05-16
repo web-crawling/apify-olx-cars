@@ -134,11 +134,14 @@ def compute_diff(
             change_type = 'UNCHANGED'
             first_seen_at = prior['firstSeenAt']
 
-        prior_history = prior.get('priceHistory') or []
+        prior_history = prior.get('priceHistory')
+        if not isinstance(prior_history, list):
+            # Defensive: KV entries can be manually edited; non-list values would crash _append_price_history
+            prior_history = []
         if not prior_history and prior.get('price') is not None:
             # Legacy snapshot entry without priceHistory — seed from stored price/currency
             prior_history = [{
-                'seenAt': prior['lastSeenAt'],
+                'seenAt': prior.get('lastSeenAt', run_ts),
                 'price': prior.get('price'),
                 'currency': prior.get('currency'),
             }]

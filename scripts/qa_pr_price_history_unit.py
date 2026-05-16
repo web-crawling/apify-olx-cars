@@ -219,6 +219,146 @@ check("8b: second entry seenAt == run_ts",
       f"got {ph_b[1].get('seenAt')!r}")
 
 # ---------------------------------------------------------------------------
+# EC1: Corrupted priceHistory in KV snapshot (e.g. stored as a string)
+# Expected: compute_diff should NOT crash; should recover to empty history.
+# Currently this CRASHES with AttributeError because `or []` doesn't guard
+# against a truthy non-list value.
+# ---------------------------------------------------------------------------
+section("EC1: Corrupted priceHistory (string) in snapshot — crash test")
+
+corrupted_snapshot = {
+    "offer-corrupt": {
+        "price": 10000,
+        "currency": "EUR",
+        "condition": "used",
+        "mileageKm": 30000,
+        "title": "Corrupt Car",
+        "firstSeenAt": "2026-01-01T00:00:00+00:00",
+        "lastSeenAt": "2026-04-01T00:00:00+00:00",
+        "priceHistory": "this-is-a-string-not-a-list",  # corrupted
+    }
+}
+item_corrupt = {
+    "offerId": "offer-corrupt",
+    "price": 10000,
+    "currency": "EUR",
+    "condition": "used",
+    "mileageKm": 30000,
+    "title": "Corrupt Car",
+}
+try:
+    ct_ec1, _, _, entry_ec1 = compute_diff(item_corrupt, corrupted_snapshot, RUN_TS)
+    # If it doesn't crash, check result is a valid list
+    ph_ec1 = entry_ec1.get("priceHistory")
+    check("EC1: compute_diff does NOT crash on corrupted priceHistory", True)
+    check("EC1: recovered priceHistory is a list", isinstance(ph_ec1, list),
+          f"got type {type(ph_ec1).__name__}: {ph_ec1!r}")
+except AttributeError as e:
+    check("EC1: compute_diff does NOT crash on corrupted priceHistory", False,
+          f"AttributeError raised: {e}")
+    check("EC1: recovered priceHistory is a list", False, "not reached (crashed)")
+except Exception as e:
+    check("EC1: compute_diff does NOT crash on corrupted priceHistory", False,
+          f"{type(e).__name__}: {e}")
+    check("EC1: recovered priceHistory is a list", False, "not reached (crashed)")
+
+# ---------------------------------------------------------------------------
+# EC2: Legacy snapshot entry missing 'lastSeenAt' but has 'price'
+# Seed-on-read path does prior['lastSeenAt'] — KeyError if absent.
+# ---------------------------------------------------------------------------
+section("EC2: Legacy snapshot missing lastSeenAt — KeyError crash test")
+
+missing_lastSeen_snapshot = {
+    "offer-nots": {
+        "price": 8000,
+        "currency": "EUR",
+        "condition": "used",
+        "mileageKm": 20000,
+        "title": "No Timestamp Car",
+        "firstSeenAt": "2026-01-01T00:00:00+00:00",
+        # NO 'lastSeenAt' key
+        # NO 'priceHistory' key -> seed-on-read triggers -> hits prior['lastSeenAt']
+    }
+}
+item_nots = {
+    "offerId": "offer-nots",
+    "price": 8000,
+    "currency": "EUR",
+    "condition": "used",
+    "mileageKm": 20000,
+    "title": "No Timestamp Car",
+}
+try:
+    ct_ec2, _, _, entry_ec2 = compute_diff(item_nots, missing_lastSeen_snapshot, RUN_TS)
+    ph_ec2 = entry_ec2.get("priceHistory")
+    check("EC2: compute_diff does NOT crash on missing lastSeenAt", True)
+    check("EC2: priceHistory is a list", isinstance(ph_ec2, list),
+          f"got type {type(ph_ec2).__name__}")
+except KeyError as e:
+    check("EC2: compute_diff does NOT crash on missing lastSeenAt", False,
+          f"KeyError: {e}")
+    check("EC2: priceHistory is a list", False, "not reached (crashed)")
+except Exception as e:
+    check("EC2: compute_diff does NOT crash on missing lastSeenAt", False,
+          f"{type(e).__name__}: {e}")
+    check("EC2: priceHistory is a list", False, "not reached (crashed)")
+
+# ---------------------------------------------------------------------------
+# EC3: Snapshot manually grown to >50 entries; price UNCHANGED.
+# The cap (FIFO) is only enforced when a new entry is appended.
+# When unchanged, _append_price_history returns the input list unchanged.
+# So a >50 entry snapshot persists through an unchanged run.
+# This is LOW severity — documents expected current behavior.
+# ---------------------------------------------------------------------------
+section("EC3: >50 entries in snapshot, price UNCHANGED — cap not re-enforced")
+
+# Build a 60-entry history (simulates manually edited snapshot)
+big_history = [
+    {"seenAt": f"2026-01-{i+1:02d}T00:00:00+00:00", "price": 5000 + i, "currency": "EUR"}
+    for i in range(60)
+]
+big_snapshot = {
+    "offer-big": {
+        "price": 5059,   # == last entry price (60th entry: 5000+59=5059)
+        "currency": "EUR",
+        "condition": "used",
+        "mileageKm": 10000,
+        "title": "Big History Car",
+        "firstSeenAt": "2026-01-01T00:00:00+00:00",
+        "lastSeenAt": "2026-04-01T00:00:00+00:00",
+        "priceHistory": big_history,
+    }
+}
+item_big = {
+    "offerId": "offer-big",
+    "price": 5059,   # same as last entry → UNCHANGED → no append
+    "currency": "EUR",
+    "condition": "used",
+    "mileageKm": 10000,
+    "title": "Big History Car",
+}
+try:
+    ct_ec3, _, _, entry_ec3 = compute_diff(item_big, big_snapshot, RUN_TS)
+    ph_ec3 = entry_ec3.get("priceHistory", [])
+    # UNCHANGED price → _append_price_history returns original 60-entry list unchanged
+    # This documents that cap is NOT re-enforced on unchanged runs.
+    cap_re_enforced = len(ph_ec3) <= MAX_PRICE_HISTORY
+    check("EC3: compute_diff handles >50-entry snapshot without crash", True)
+    if cap_re_enforced:
+        check("EC3: cap re-enforced even on unchanged price (better behavior)", True)
+    else:
+        # Document as known current behavior, not a crash
+        check(
+            f"EC3 (known behavior): >50-entry snapshot NOT capped on UNCHANGED run "
+            f"(len={len(ph_ec3)}; cap only enforces on price-change appends)",
+            True,  # not a FAIL — just documenting behavior
+        )
+except Exception as e:
+    check("EC3: compute_diff handles >50-entry snapshot without crash", False,
+          f"{type(e).__name__}: {e}")
+    check("EC3: cap behavior note", False, "not reached (crashed)")
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 print(f"\n{'='*60}")

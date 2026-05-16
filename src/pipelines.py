@@ -4,12 +4,20 @@ Pipelines:
   MaxItemsPipeline — enforces the maxItems ceiling at process_item time.
     Raises CloseSpider when the limit is reached, which signals Scrapy to
     shut down cleanly and lets Apify report SUCCEEDED with the items collected.
+
+  DropNonesPipeline — recursively removes None values from items before
+    they reach the Apify dataset push pipeline. Apify's dataset schema
+    rejects null for typed fields (Draft7 default behavior), so items
+    with country-specific fields (e.g. district=None for PT/RO/BG/KZ)
+    must be cleaned before push. See issue #33 for the failing run that
+    motivated this pipeline.
 """
 
 from __future__ import annotations
 
 import logging
 
+from itemadapter import ItemAdapter
 from scrapy.exceptions import CloseSpider, DropItem
 
 logger = logging.getLogger(__name__)
@@ -44,3 +52,33 @@ class MaxItemsPipeline:
                 f'maxItems={self.max_items} reached — stopping spider.'
             )
         return item
+
+
+def _drop_nones(obj):
+    """Recursively drop None values from dicts; preserve list/scalar structure."""
+    if isinstance(obj, dict):
+        return {
+            k: _drop_nones(v)
+            for k, v in obj.items()
+            if v is not None
+        }
+    if isinstance(obj, list):
+        return [_drop_nones(v) for v in obj]
+    return obj
+
+
+class DropNonesPipeline:
+    """Strip None values (top-level and nested) before the Apify dataset push.
+
+    Apify's dataset_schema declares typed fields (string, integer, etc.) and
+    rejects null values for those types — items with country-specific optional
+    fields would otherwise fail HTTP 400 at push time with "Schema validation
+    failed", causing a silent 0-items SUCCEEDED run. By dropping null keys
+    here, the resulting dict only contains fields that have real values, and
+    JSON Schema's default "additionalProperties allowed, missing fields OK"
+    behavior accepts them cleanly.
+    """
+
+    def process_item(self, item, spider):
+        cleaned = _drop_nones(ItemAdapter(item).asdict())
+        return cleaned

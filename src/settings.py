@@ -75,4 +75,20 @@ RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429]
 
 ITEM_PIPELINES = {
     'src.pipelines.MaxItemsPipeline': 100,
+    # DropNonesPipeline must run BEFORE the Apify dataset push pipeline
+    # (registered by apply_apify_settings() at priority 1000), so its
+    # priority is set between 100 and 1000.
+    'src.pipelines.DropNonesPipeline': 500,
+}
+
+# ---------------------------------------------------------------------------
+# Extensions
+# ---------------------------------------------------------------------------
+
+EXTENSIONS = {
+    # Hooks scrapy.signals.item_error to mark the spider's class-level
+    # crawl_failed flag whenever a pipeline raises. main.py reads that flag
+    # and calls Actor.fail(), turning silent-SUCCEEDED-with-0-items runs into
+    # visible FAILED runs. See src/extensions.py for the full rationale.
+    'src.extensions.FailOnItemErrorExtension': 500,
 }

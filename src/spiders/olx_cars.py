@@ -221,8 +221,13 @@ class OlxCarsSpider(scrapy.Spider):
     name = 'olx_cars'
 
     # Class-level flag — set True on fatal error; checked by main.py after crawl.
-    # CRITICAL: must be a CLASS attribute (not instance attribute) because
-    # CrawlerRunner.crawl() returns None, so main.py cannot access the instance.
+    # Class-level flag — set True on fatal error; checked by main.py after crawl.
+    # CRITICAL: must remain a CLASS attribute (not an instance attribute).
+    # CrawlerRunner.crawl() returns a Deferred that resolves to None, not the
+    # spider instance — so main.py can never access an instance attribute after
+    # the crawl completes. Refactoring this to self.crawl_failed reintroduces
+    # the silent-failure bug (actor reports SUCCEEDED with 0 items on HTTP error).
+    # See src/main.py module docstring for the full rationale.
     crawl_failed: bool = False
 
     def __init__(self, **kwargs: Any) -> None:

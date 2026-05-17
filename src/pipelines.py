@@ -214,8 +214,8 @@ class FairPricePipeline:
     Priority: 600 — after DropNonesPipeline (500), before Apify push (1000).
 
     Bucket key: (make, model, year_bucket, mileage_bucket, currency)
-      - year_bucket: 2-year bands via (year // 2) * 2
-      - mileage_bucket: 20k km linear bands via (mileageKm // 20_000) * 20_000
+      - year_bucket: 5-year bands via (year // 5) * 5
+      - mileage_bucket: 50k km linear bands via (mileageKm // 50_000) * 50_000
       - currency included so PLN/UAH/EUR run independently; no EUR restriction
     """
 
@@ -223,7 +223,7 @@ class FairPricePipeline:
     # Reset in open_spider() on each run (mirrors IncrementalDiffPipeline pattern).
     items_buffer: list = []
     keys_buffer: list = []
-    min_bucket_size: int = 10  # minimum items per bucket for median to be emitted
+    min_bucket_size: int = 5  # minimum items per bucket for median to be emitted (was 10, tuned in PR #49)
 
     def open_spider(self, spider) -> None:
         # Reset class attributes for this run so stale data from a prior
@@ -266,8 +266,8 @@ class FairPricePipeline:
         if price is None or not currency:
             return None
         try:
-            year_bucket = (int(year) // 2) * 2
-            mileage_bucket = (int(mileage_km) // 20_000) * 20_000
+            year_bucket = (int(year) // 5) * 5      # 5-year bands (was //2 *2 in PR #48; tuned in PR #49)
+            mileage_bucket = (int(mileage_km) // 50_000) * 50_000  # 50k km bands (was //20_000 *20_000 in PR #48; tuned in PR #49)
         except (TypeError, ValueError):
             return None
         return (str(make).lower(), str(model).lower(), year_bucket, mileage_bucket, str(currency).upper())

@@ -61,8 +61,9 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 # ---------------------------------------------------------------------------
 
 MISSING_ITEM_WITH_NONES: dict = {
-    # offerId added by compute_missing (always a string from snapshot key)
-    "offerId": "123456789",
+    # offerId added by compute_missing — integer per dataset_schema (cast from
+    # the snapshot's string key inside compute_missing post-#44-hotfix)
+    "offerId": 123456789,
     "changeType": "MISSING",
     # Snapshot-stored fields, some legitimately None
     "price": None,
@@ -111,7 +112,7 @@ check("title_None_stripped", "title" not in result, f"title={result.get('title')
 # Assertions: non-None values are preserved unchanged
 # ---------------------------------------------------------------------------
 
-check("offerId_preserved", result.get("offerId") == "123456789", f"got {result.get('offerId')!r}")
+check("offerId_preserved", result.get("offerId") == 123456789, f"got {result.get('offerId')!r}")
 check("changeType_preserved", result.get("changeType") == "MISSING", f"got {result.get('changeType')!r}")
 check("mileageKm_preserved", result.get("mileageKm") == 50000, f"got {result.get('mileageKm')!r}")
 check("condition_preserved", result.get("condition") == "used", f"got {result.get('condition')!r}")
@@ -159,7 +160,7 @@ check("location_district_None_stripped", "district" not in loc, f"district={loc.
 # ---------------------------------------------------------------------------
 
 check("mileageKm_is_int", isinstance(result.get("mileageKm"), int), f"got {type(result.get('mileageKm')).__name__}")
-check("offerId_is_str", isinstance(result.get("offerId"), str), f"got {type(result.get('offerId')).__name__}")
+check("offerId_is_int", isinstance(result.get("offerId"), int) and not isinstance(result.get("offerId"), bool), f"got {type(result.get('offerId')).__name__}")
 check("priceHistory_is_list_type", isinstance(result.get("priceHistory"), list))
 check("isRepost_is_bool", isinstance(result.get("isRepost"), bool), f"got {type(result.get('isRepost')).__name__}")
 
@@ -172,6 +173,54 @@ check(
     MISSING_ITEM_WITH_NONES.get("price") is None,
     "original price should still be None",
 )
+
+# ---------------------------------------------------------------------------
+# Integration check: compute_missing emits offerId as integer
+# (post-hotfix; pre-hotfix it leaked the str snapshot-key, breaking schema)
+# ---------------------------------------------------------------------------
+
+from src.state import compute_missing  # noqa: E402
+
+_snapshot_with_missing = {
+    # Snapshot keys are always strings (str(offerId)); compute_missing must
+    # cast back to int when constructing missing_item['offerId'] to satisfy
+    # dataset_schema's "type": "integer".
+    "987654321": {
+        "price": 12000,
+        "currency": "EUR",
+        "mileageKm": 80000,
+        "title": "Some car",
+        "firstSeenAt": "2026-05-10T08:00:00+00:00",
+        "lastSeenAt": "2026-05-12T08:00:00+00:00",
+        "priceHistory": [{"seenAt": "2026-05-10T08:00:00+00:00", "price": 12000, "currency": "EUR"}],
+    },
+}
+_seen_ids: set = set()  # entry is absent from this run → MISSING
+_missing = compute_missing(
+    snapshot=_snapshot_with_missing,
+    seen_ids=_seen_ids,
+    emit_missing=True,
+    run_ts="2026-05-17T13:00:00+00:00",
+    was_truncated=False,
+)
+check("compute_missing_emits_one_item", len(_missing) == 1, f"got {len(_missing)}")
+if _missing:
+    _mi = _missing[0]
+    check(
+        "compute_missing_offerId_is_int",
+        isinstance(_mi.get("offerId"), int) and not isinstance(_mi.get("offerId"), bool),
+        f"got {type(_mi.get('offerId')).__name__} value={_mi.get('offerId')!r}",
+    )
+    check(
+        "compute_missing_offerId_value",
+        _mi.get("offerId") == 987654321,
+        f"got {_mi.get('offerId')!r}",
+    )
+    check(
+        "compute_missing_changeType_MISSING",
+        _mi.get("changeType") == "MISSING",
+        f"got {_mi.get('changeType')!r}",
+    )
 
 # ---------------------------------------------------------------------------
 # Summary

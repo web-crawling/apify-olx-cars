@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.6.0 — 2026-05-17
+
+### Changed
+- **Fair-price rating defaults tuned** — `priceVsMedianPct` and `priceRating` now
+  emit on substantially more listings (~40 % of items in typical single-country
+  single-brand runs, up from ~1 % in v0.5.0). New bucket parameters: minimum
+  bucket size 5 (was 10), year band 5 years (was 2), mileage band 50,000 km
+  (was 20,000). The field shape is unchanged; consumers will simply see ratings on
+  more items. Tuned via offline ablation on 4,000 real OLX listings (see issue #49).
+
 ## v0.5.0 — 2026-05-17
 
 ### Added

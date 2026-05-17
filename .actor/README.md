@@ -37,7 +37,7 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **Not yet supported:** Brazil (olx.com.br) -- runs on a different stack with Cloudflare protection; a separate actor is on the roadmap.
 - **Data source:** OLX's public `/api/v1/offers/` JSON endpoint.
 - **Proxy required:** No.
-- **Output:** JSON -- 43 always-on top-level fields per listing (price, make, model, year, mileage, fuel, transmission, body type, seller info, location, photo URLs) plus 5 incremental-mode-only fields when `incrementalMode: true`.
+- **Output:** JSON -- 43 always-on top-level fields per listing (price, make, model, year, mileage, fuel, transmission, body type, seller info, location, photo URLs) plus 5 incremental-mode-only fields when `incrementalMode: true`, plus `extraAttributes`, `priceVsMedianPct`, and `priceRating` when applicable.
 - **Throughput:** 40-65 listings per API call; one country's full structured-filter run typically returns up to 1,000 listings before the OLX cap.
 - **Coverage past 1,000 results:** automatic brand-level and year-band slicing when `maxItems > 1000`.
 - **Authentication:** none required -- runs against public listing endpoints.
@@ -50,7 +50,10 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **Price range filtering** -- filter by `priceFrom`/`priceTo` in any of seven supported currencies.
 - **Automatic slicing past the 1,000-result API cap** -- when `maxItems > 1000`, the actor fans out over brand-level and year-band sub-queries to maximise coverage.
 - **Normalised vehicle specs** -- `fuelType`, `transmission`, `bodyType`, and `condition` are mapped to consistent English enums across all six countries despite regional API vocabulary differences.
-- **43 always-on top-level fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through.
+- **Seller type filtering** -- narrow results to private sellers (`sellerType: "private"`) or dealers (`sellerType: "business"`); universal across all six countries.
+- **Within-run fair-price rating** -- `priceVsMedianPct` and `priceRating` computed from the listings in each run; useful when running broad queries where enough comparable listings form a bucket.
+- **Country-specific attributes pass-through** -- `extraAttributes` exposes all OLX `params[]` fields not already in top-level output, including door count, engine power, body sub-type, and other locale-specific values.
+- **43 always-on top-level fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through. Three additional conditionally-present fields (`extraAttributes`, `priceVsMedianPct`, `priceRating`) are included when applicable.
 - **No proxy required** -- direct datacenter access to OLX's public API.
 - **Incremental monitoring mode** -- opt-in change tracking across runs; emit only new, updated, or missing listings instead of the full dataset every time.
 
@@ -138,6 +141,19 @@ Brazil is explicitly excluded from this actor. The olx.com.br platform requires 
 }
 ```
 
+### Filter by private sellers only
+
+```json
+{
+  "country": "ro",
+  "brands": ["BMW"],
+  "sellerType": "private",
+  "maxItems": 100
+}
+```
+
+Set `sellerType` to `"business"` to see only dealer listings instead.
+
 ### Enumerate more than 1,000 listings
 
 ```json
@@ -162,6 +178,7 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 | `yearFrom` / `yearTo` | integer | NO | -- | Manufacture year range (1900-2099) |
 | `priceFrom` / `priceTo` | integer | NO | -- | Price range in `priceCurrency` |
 | `priceCurrency` | enum | NO | `"EUR"` | `EUR, RON, PLN, UAH, USD, BGN, KZT` |
+| `sellerType` | enum | NO | `"any"` | Filter listings by seller type: `"any"` (default, no filter), `"private"` (private sellers only), `"business"` (dealers/businesses only). Applies in both structured-filter and `startUrls` modes. In `startUrls` mode, an existing `filter_enum_business` value in the URL takes precedence and `sellerType` has no effect. |
 | `sortBy` | enum | NO | `"created_at:desc"` | `created_at:desc, filter_float_price:asc, filter_float_price:desc, relevance` |
 | `maxItems` | integer | NO | `1000` | Hard ceiling. OLX caps single queries at 1,000; `> 1000` triggers auto brand x year x price slicing |
 | `incrementalMode` | boolean | NO | `false` | Enable change tracking across runs. See Incremental Monitoring section. |
@@ -175,7 +192,7 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 
 ## Output Data
 
-Every output item is a JSON object. All fields are always present -- fields with no value are `null` (or `[]` for array fields).
+Every output item is a JSON object. Most fields are always present -- fields with no value are `null` (or `[]` for array fields). Fields that are conditional (incremental-mode fields and the three fair-price / extra-attributes fields) are absent from the item entirely rather than null when they do not apply; see individual field notes.
 
 ### Sample output item
 
@@ -231,6 +248,15 @@ Every output item is a JSON object. All fields are always present -- fields with
     {"key": "petrol", "value": {"key": "diesel", "label": "Diesel"}},
     {"key": "gearbox", "value": {"key": "automatic", "label": "Automat"}}
   ],
+  "extraAttributes": {
+    "car_body": "SUV",
+    "color": "Negru",
+    "door_count": "4",
+    "engine_power": "190 CP",
+    "gearbox": "Automat"
+  },
+  "priceVsMedianPct": -12.5,
+  "priceRating": "good",
   "seller": {
     "id": 12345678,
     "uuid": "abc123-...",
@@ -316,6 +342,9 @@ Every output item is a JSON object. All fields are always present -- fields with
 | `lastSeenAt` | string | YES | ISO 8601 UTC. Updated each run the listing is present. Not updated for MISSING items. Only present when `incrementalMode: true`. |
 | `priceHistory` | array[object] | YES | Per-listing price observations across runs. Only present when `incrementalMode: true`. See Price history section below. |
 | `isRepost` | boolean | NO | `true` when `changeType` is `REAPPEARED` (the listing was absent in the prior run and has returned); `false` for all other change types. Only present when `incrementalMode: true`. |
+| `extraAttributes` | object | YES | Flat `{key: label}` dict of all OLX `params[]` entries for this listing. Covers country-specific attributes not surfaced as dedicated top-level fields. Keys are OLX param keys; values are the localised label strings as provided by OLX (Romanian on RO, Polish on PL, Bulgarian Cyrillic on BG, etc.). Some keys duplicate top-level fields (e.g. `fuel_type` appears here as a localised label alongside the normalised `fuelType` enum). Absent when `params[]` is empty. |
+| `priceVsMedianPct` | number | YES | Percentage deviation of this listing's price from the within-run bucket median. Bucket key: same `make`, `model`, 2-year year-band, 20,000 km mileage-band, and currency. Requires at least 10 listings in the bucket; absent otherwise, or when price is undisclosed, or for `MISSING` incremental items (stale prices excluded). This is a within-run comparison, not a historical market median. Narrow runs (single brand on a small country) often produce small buckets and may yield no rated items. |
+| `priceRating` | string | YES | Qualitative price rating derived from `priceVsMedianPct`. Values: `very_good` (≤ −15 %), `good` (−15 % to −5 %), `fair` (±5 %), `high` (5 % to 15 %), `very_high` (≥ 15 %). Absent when `priceVsMedianPct` is absent. |
 
 ## Use Cases
 
@@ -558,6 +587,12 @@ If you need a heuristic body-type classification for BG listings, read the `para
 
 **`make` field is null in startUrls / parent-category mode.** The `make` field is populated from OLX's category metadata (`cat_l2_name`), which is only present in brand-leaf category responses. When using `startUrls` pointing to a parent category URL (not a brand-specific sub-category), or when a brand is not found in the brand map, `make` will be null. `model` and other fields extracted from per-listing `params` are unaffected.
 
+**Fair-price rating requires a broad run to be useful.** The `priceVsMedianPct` and `priceRating` fields are computed within each run by bucketing listings on make, model, 2-year year-band, 20,000 km mileage-band, and currency. A bucket must contain at least 10 listings before any item in it receives a rating. Single-brand queries on small markets, niche models, or narrow mileage bands frequently produce buckets below this threshold -- such runs return no rated items. If fair-price coverage matters, run broader queries (parent cars category without a `brands` filter, or a multi-brand list). The rating reflects current within-run prices only, not a historical OLX market median.
+
+**`MISSING` incremental items do not receive fair-price fields.** When `emitMissing: true`, items emitted with `changeType: MISSING` come from the prior-run snapshot and may have stale prices. `priceVsMedianPct` and `priceRating` are intentionally absent for MISSING items to avoid comparing stale snapshot prices against the current run's median.
+
+**`extraAttributes` values are in the listing language.** The `extraAttributes` dict passes through OLX param labels as-is: Romanian on olx.ro, Polish on olx.pl, Bulgarian Cyrillic on olx.bg, etc. These are not normalised to English. For the normalised versions of fuel type, transmission, and body type, use the top-level `fuelType`, `transmission`, and `bodyType` fields instead.
+
 **GPS coordinates may be obfuscated.** Some sellers hide their exact location. When `location.gpsObfuscated` is `true`, the `latitude` and `longitude` coordinates represent a neighbourhood centroid rather than the exact address.
 
 ## Frequently Asked Questions
@@ -603,6 +638,9 @@ The actor returns 40-65 listings per API call. Concurrency per domain ranges fro
 
 **Why was Romania chosen as the default country?**
 Romania has the highest car-listing volume among the supported countries (approximately 128,000 active listings) and EUR pricing is common in RO, which makes it easy to compare prices across European markets without currency conversion. `"ro"` as the default also means the quickest path to a working first run for most users.
+
+**Why are `priceVsMedianPct` and `priceRating` absent from my output?**
+These fields require at least 10 listings in the same bucket (same make, model, 2-year year-band, 20,000 km mileage-band, and currency) within a single run. Narrow queries -- a single niche brand, a tight year range, or a small country with few listings -- often produce small buckets where no rating is assigned. Run broader queries (omit the `brands` filter or include multiple brands) to improve bucket fill. The fields are also absent for `MISSING` incremental items and for listings where price is undisclosed.
 
 **Why does my first run with incremental mode show 0 items?**
 This is expected. The first run with `incrementalMode: true` builds the baseline snapshot and emits nothing to the dataset. Run the actor a second time with the same `stateKey` and it will emit only listings that are new or changed since the first run. See the Incremental Monitoring section for details.

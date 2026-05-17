@@ -80,6 +80,15 @@
 			"default": "EUR",
 			"description": "Currency for priceFrom/priceTo filters. Must match the listing currency on OLX for the filter to apply. EUR is the most interoperable choice across all supported countries. Ignored when startUrls is provided."
 		},
+		"sellerType": {
+			"title": "Seller Type",
+			"type": "string",
+			"editor": "select",
+			"enum": ["any", "private", "business"],
+			"enumTitles": ["Any seller", "Private seller only", "Business / dealer only"],
+			"default": "any",
+			"description": "Filter listings by seller type. 'Private' returns individual sellers only (filter_enum_business:0); 'Business' returns dealers only (filter_enum_business:1); 'Any' applies no filter. Applies in both structured-filter mode and startUrls mode. Universal across all 6 supported countries."
+		},
 		"sortBy": {
 			"title": "Sort Order",
 			"type": "string",

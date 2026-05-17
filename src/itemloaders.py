@@ -148,3 +148,16 @@ class CarItemLoader(ItemLoader):
     images_out = Identity()
     features_out = Identity()
     paramsRaw_out = Identity()
+
+    # --- Extra attributes and fair-price fields: TakeFirst() output --------
+    # extraAttributes is a scalar dict assembled in the spider and passed via
+    # add_value() — TakeFirst() returns it as-is, NOT Identity() which would
+    # wrap the dict in a list.
+    extraAttributes_in = MapCompose(pass_through)
+    extraAttributes_out = TakeFirst()
+
+    # priceVsMedianPct and priceRating are set directly on items by
+    # FairPricePipeline in main.py (bypassing the loader) — but the output
+    # processors are declared here for completeness and schema alignment.
+    priceVsMedianPct_out = TakeFirst()
+    priceRating_out = TakeFirst()

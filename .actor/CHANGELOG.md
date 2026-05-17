@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.0 — 2026-05-17
+
+### Added
+- **Seller type filter** — new `sellerType` input (`any` / `private` / `business`; default `any`). Injects `filter_enum_business=0` (private) or `=1` (business) into the OLX API request. Works in both structured-filter and `startUrls` modes across all 6 supported countries. In `startUrls` mode, an existing `filter_enum_business` value in the user's URL is not overridden.
+- **Extra attributes pass-through** — new `extraAttributes` output field: a flat `{key: label}` dict of all OLX `params[]` entries not suppressed as arrays. Covers country-specific fields not surfaced as dedicated top-level fields (e.g. `door_count`, `enginesize`, `color` on RO; `nr_seats`, `co2_emissions` on PT). Keys and values are the raw OLX strings; values may be in the listing language (Romanian, Polish, Bulgarian Cyrillic, etc.). Field is absent when `params[]` is empty.
+- **Within-run fair-price rating** — two new output fields computed from all listings in a single run: `priceVsMedianPct` (number, % deviation from within-run bucket median) and `priceRating` (string enum). Bucket key: same `make`, `model`, 2-year year-band, 20,000 km mileage-band, and currency. Bucket must contain at least 10 items; both fields are absent when the bucket is smaller, price is undisclosed, or the listing is a `MISSING` incremental item. `priceRating` values: `very_good` (≤ −15 %), `good` (−15 % to −5 %), `fair` (±5 %), `high` (5 % to 15 %), `very_high` (≥ 15 %).
+
 ## v0.4.0 — 2026-05-17
 
 ### Added

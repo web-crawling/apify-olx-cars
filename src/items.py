@@ -84,3 +84,10 @@ class CarItem(scrapy.Item):
     lastSeenAt = scrapy.Field()    # str|None: ISO 8601 UTC — when listing last seen in results
     priceHistory = scrapy.Field()  # list[dict]|None: price history entries; incrementalMode only
     isRepost = scrapy.Field()      # bool|None: True when changeType==REAPPEARED; incrementalMode only
+
+    # --- Extra attributes passthrough (#25) -----------------------------------
+    extraAttributes = scrapy.Field()     # dict|None: flat {param.key: value.label}; TakeFirst()
+
+    # --- Fair-price computed fields (#18) -------------------------------------
+    priceVsMedianPct = scrapy.Field()    # float|None: % deviation from bucket median; TakeFirst()
+    priceRating = scrapy.Field()         # str|None: very_good/good/fair/high/very_high; TakeFirst()

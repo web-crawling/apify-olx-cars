@@ -30,6 +30,7 @@ from scrapy.utils.project import get_project_settings
 # We will directly use our settings module + INPUT_DATA approach
 from src.spiders.olx_cars import OlxCarsSpider
 from src.items import CarItem
+from src.pipelines import FairPricePipeline
 
 SCENARIOS = [
     {
@@ -116,30 +117,33 @@ def run_scenario(scenario: dict, out_file: str) -> dict:
     settings.set("INPUT_DATA", input_data, priority="spider")
     settings.set("FEEDS", {out_file: {"format": "jsonlines", "overwrite": True}}, priority="spider")
     settings.set("LOG_LEVEL", "WARNING")
-    # Disable Apify pipeline — match production chain (minus the Apify push at 1000)
+    # Disable Apify pipeline — match production chain (minus the Apify push at 1000).
+    # FairPricePipeline is included so items are buffered (and NOT written to FEEDS
+    # via the normal Scrapy FEEDS writer, which runs after all pipelines). Without
+    # it, items would flow through to the FEEDS writer directly — a different chain
+    # than production. Note: buffered items are NOT pushed to Apify here (no Actor
+    # SDK context), but the buffer is populated and accessible for assertion checks.
     settings.set("ITEM_PIPELINES", {
         "src.pipelines.MaxItemsPipeline": 100,
         "src.pipelines.IncrementalDiffPipeline": 200,
         "src.pipelines.DropNonesPipeline": 500,
+        "src.pipelines.FairPricePipeline": 600,
     }, priority="spider")
 
-    # Reset class-level failed flag
+    # Reset class-level flags
     OlxCarsSpider.crawl_failed = False
+    FairPricePipeline.items_buffer = []
+    FairPricePipeline.keys_buffer = []
 
     process = CrawlerProcess(settings)
     process.crawl(OlxCarsSpider)
     process.start()  # blocks until done
 
-    # Read output
-    items = []
-    try:
-        with open(out_file, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    items.append(json.loads(line))
-    except FileNotFoundError:
-        pass
+    # FairPricePipeline raises DropItem for every item, so the Scrapy FEEDS
+    # writer receives nothing (FEEDS file stays empty). Read items from the
+    # class-attribute buffer instead — this mirrors the production path where
+    # main.py reads FairPricePipeline.items_buffer after the crawl.
+    items = list(FairPricePipeline.items_buffer)
 
     return {
         "items": items,

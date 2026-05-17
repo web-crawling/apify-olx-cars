@@ -218,17 +218,20 @@ def compute_missing(
         if new_count >= MISSING_PURGE_THRESHOLD:
             # Purge this entry after 3 consecutive absences
             if emit_missing:
-                # Emit the MISSING item before purging
+                # Emit the MISSING item before purging.
+                # offerId is stored as str (snapshot key) but dataset_schema declares
+                # it as integer — convert back to int to satisfy schema validation.
                 missing_item = {k: v for k, v in entry.items() if k != '_missingCount'}
-                missing_item['offerId'] = offer_id_str
+                missing_item['offerId'] = int(offer_id_str)
                 missing_item['changeType'] = 'MISSING'
                 missing_items.append(missing_item)
             to_purge.append(offer_id_str)
         else:
             if emit_missing:
-                # Emit the MISSING item (count < threshold, so listing still in snapshot)
+                # Emit the MISSING item (count < threshold, so listing still in snapshot).
+                # See offerId cast comment above.
                 missing_item = {k: v for k, v in entry.items() if k != '_missingCount'}
-                missing_item['offerId'] = offer_id_str
+                missing_item['offerId'] = int(offer_id_str)
                 missing_item['changeType'] = 'MISSING'
                 missing_items.append(missing_item)
             to_increment.append((offer_id_str, new_count))

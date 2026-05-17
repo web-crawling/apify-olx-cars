@@ -83,3 +83,4 @@ class CarItem(scrapy.Item):
     firstSeenAt = scrapy.Field()   # str|None: ISO 8601 UTC — when listing first entered state
     lastSeenAt = scrapy.Field()    # str|None: ISO 8601 UTC — when listing last seen in results
     priceHistory = scrapy.Field()  # list[dict]|None: price history entries; incrementalMode only
+    isRepost = scrapy.Field()      # bool|None: True when changeType==REAPPEARED; incrementalMode only

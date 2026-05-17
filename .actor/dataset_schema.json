@@ -218,6 +218,10 @@
 					}
 				}
 			},
+			"isRepost": {
+				"type": "boolean",
+				"description": "True when this offer reappeared after being absent from at least one prior run (changeType == REAPPEARED). False for NEW, UPDATED, UNCHANGED, and MISSING items. Only present when incrementalMode is true."
+			},
 			"paramsRaw": {
 				"type": "array",
 				"items": {

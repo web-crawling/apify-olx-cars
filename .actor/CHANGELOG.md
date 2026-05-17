@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.0 — 2026-05-17
+
+### Added
+- **Repost detection** — when `incrementalMode: true`, each output item now includes an `isRepost` boolean field. It is `true` when `changeType` is `REAPPEARED` (the listing was absent in the prior run and has returned, typically a seller deleting and re-listing for freshness), and `false` for all other change types. The field is absent entirely when `incrementalMode: false`.
+- New output field (only present when `incrementalMode: true`): `isRepost` (boolean).
+
 ## v0.3.0 — 2026-05-16
 
 ### Added

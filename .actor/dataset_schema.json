@@ -229,6 +229,18 @@
 				},
 				"description": "Full raw params array from the OLX API offer object. Pass-through for country-specific fields not surfaced by the normalised schema. Always present (empty array when params absent)."
 			},
+			"extraAttributes": {
+				"type": "object",
+				"description": "Flat dict of extra listing attributes derived from the OLX params[] array. Keys are OLX param keys (e.g. 'fuel_type', 'model', 'gearbox'), values are the human-readable label strings (e.g. 'Petrol', 'X5', 'Automatic'). Includes all params not already surfaced as dedicated top-level fields. Absent when no params are present. Country-specific — keys vary by domain."
+			},
+			"priceVsMedianPct": {
+				"type": "number",
+				"description": "Percentage deviation of this listing's price from the median price in its comparison bucket (same make, model, year band, mileage band, and currency). Negative values indicate below-median (good deal); positive values indicate above-median (expensive). Absent when the bucket contains fewer than 10 listings or when price is not disclosed."
+			},
+			"priceRating": {
+				"type": "string",
+				"description": "Qualitative fair-price rating derived from priceVsMedianPct. Values: very_good (>= 15% below median), good (5–15% below), fair (within ±5%), high (5–15% above), very_high (>= 15% above). Absent when priceVsMedianPct is absent."
+			},
 			"seller": {
 				"type": "object",
 				"description": "Seller profile information",
@@ -319,7 +331,9 @@
 					"country": { "label": "Country" },
 					"title": { "label": "Title" },
 					"url": { "label": "URL" },
-					"changeType": { "label": "Change Type" }
+					"changeType": { "label": "Change Type" },
+					"priceVsMedianPct": { "label": "Price vs Median (%)" },
+					"priceRating": { "label": "Price Rating" }
 				}
 			}
 		}

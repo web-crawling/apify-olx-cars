@@ -191,3 +191,104 @@ class DropNonesPipeline:
     def process_item(self, item, spider):
         cleaned = _drop_nones(ItemAdapter(item).asdict())
         return cleaned
+
+
+class FairPricePipeline:
+    """Buffer items for post-crawl fair-price median enrichment.
+
+    Receives items at priority 600, after DropNonesPipeline (500) has cleaned
+    them (so items arrive as plain dicts with no None values). Stashes each
+    item dict and its bucketing key in class-attribute lists, then raises
+    DropItem so the Apify push pipeline at priority 1000 does NOT receive them.
+
+    After the crawl completes, main.py reads the class-attribute buffers,
+    computes per-bucket medians (statistics.median), enriches each item with
+    priceVsMedianPct and priceRating (only when bucket >= min_bucket_size),
+    and pushes each enriched item directly to the Apify dataset via
+    dataset.push_data().
+
+    This mirrors the IncrementalDiffPipeline.updated_snapshot class-attribute
+    pattern — main.py reads the buffer through the class, not an instance,
+    because CrawlerRunner.crawl() returns None (not the pipeline instance).
+
+    Priority: 600 — after DropNonesPipeline (500), before Apify push (1000).
+
+    Bucket key: (make, model, year_bucket, mileage_bucket, currency)
+      - year_bucket: 2-year bands via (year // 2) * 2
+      - mileage_bucket: 20k km linear bands via (mileageKm // 20_000) * 20_000
+      - currency included so PLN/UAH/EUR run independently; no EUR restriction
+    """
+
+    # Class attributes — main.py reads these after the crawl completes.
+    # Reset in open_spider() on each run (mirrors IncrementalDiffPipeline pattern).
+    items_buffer: list = []
+    keys_buffer: list = []
+    min_bucket_size: int = 10  # minimum items per bucket for median to be emitted
+
+    def open_spider(self, spider) -> None:
+        # Reset class attributes for this run so stale data from a prior
+        # run (e.g. if the process is reused) does not bleed in.
+        type(self).items_buffer = []
+        type(self).keys_buffer = []
+
+    def process_item(self, item, spider):
+        """Stash item in class-level buffer; raise DropItem to prevent double-push.
+
+        Items arrive here as plain dicts (output of DropNonesPipeline at 500).
+        We store a reference directly — no ItemAdapter needed.
+        """
+        # item is already a plain dict at this priority (DropNonesPipeline ran at 500)
+        d = item if isinstance(item, dict) else ItemAdapter(item).asdict()
+        key = self._bucket_key(d)
+        type(self).items_buffer.append(d)
+        type(self).keys_buffer.append(key)
+        raise DropItem('FairPricePipeline: buffered for post-crawl median enrichment')
+
+    @staticmethod
+    def _bucket_key(item: dict):
+        """Compute the bucket key for median grouping.
+
+        Returns a 5-tuple (make, model, year_bucket, mileage_bucket, currency)
+        or None when the required fields are absent or non-numeric.
+
+        Currency is included in the key so that per-country single-currency
+        runs (PLN, UAH, EUR, etc.) each get their own bucket, preventing
+        cross-currency median pollution when startUrls mixes domains.
+        """
+        make = item.get('make')
+        model = item.get('model')
+        year = item.get('year')
+        mileage_km = item.get('mileageKm')
+        price = item.get('price')
+        currency = item.get('currency')
+        if not make or not model or not year or mileage_km is None:
+            return None
+        if price is None or not currency:
+            return None
+        try:
+            year_bucket = (int(year) // 2) * 2
+            mileage_bucket = (int(mileage_km) // 20_000) * 20_000
+        except (TypeError, ValueError):
+            return None
+        return (str(make).lower(), str(model).lower(), year_bucket, mileage_bucket, str(currency).upper())
+
+    @staticmethod
+    def _pct_to_rating(pct: float) -> str:
+        """Map a percentage deviation to a qualitative fair-price rating.
+
+        Thresholds (approved at Gate 1):
+          very_good : pct <= -15.0  (>= 15% below median)
+          good      : pct <= -5.0   (5–15% below median)
+          fair      : pct <   5.0   (within ±5% of median)
+          high      : pct <  15.0   (5–15% above median)
+          very_high : pct >= 15.0   (>= 15% above median)
+        """
+        if pct <= -15.0:
+            return 'very_good'
+        if pct <= -5.0:
+            return 'good'
+        if pct < 5.0:
+            return 'fair'
+        if pct < 15.0:
+            return 'high'
+        return 'very_high'

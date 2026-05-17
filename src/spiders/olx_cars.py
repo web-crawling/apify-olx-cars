@@ -271,6 +271,7 @@ class OlxCarsSpider(scrapy.Spider):
         price_from: int | None = input_data.get('priceFrom')
         price_to: int | None = input_data.get('priceTo')
         price_currency: str = str(input_data.get('priceCurrency') or 'EUR')
+        seller_type: str = str(input_data.get('sellerType') or 'any').lower().strip()
         sort_by: str = str(input_data.get('sortBy') or 'created_at:desc')
         max_items: int = int(input_data.get('maxItems') or 1000)
 
@@ -334,6 +335,22 @@ class OlxCarsSpider(scrapy.Spider):
                     # Fallback to parent cars category for this country
                     category_id = CARS_CATEGORY_ID[detected_country]
                     base_params['category_id'] = category_id
+
+                # Seller type filter (#22): inject only when not already in URL params
+                if 'filter_enum_business' not in base_params:
+                    if seller_type == 'private':
+                        base_params['filter_enum_business'] = 0
+                        logger.info(
+                            'sellerType=%s filter active, appending filter_enum_business=%s',
+                            seller_type, 0,
+                        )
+                    elif seller_type == 'business':
+                        base_params['filter_enum_business'] = 1
+                        logger.info(
+                            'sellerType=%s filter active, appending filter_enum_business=%s',
+                            seller_type, 1,
+                        )
+                # 'any': no filter added; URL-provided value: not overridden
 
                 yield from self._page_requests(
                     domain=domain,
@@ -429,6 +446,21 @@ class OlxCarsSpider(scrapy.Spider):
                 'other currencies whose numeric values fall in this range.',
                 price_from, price_to, price_currency,
             )
+
+        # Seller type filter (#22)
+        if seller_type == 'private':
+            base_params['filter_enum_business'] = 0
+            logger.info(
+                'sellerType=%s filter active, appending filter_enum_business=%s',
+                seller_type, 0,
+            )
+        elif seller_type == 'business':
+            base_params['filter_enum_business'] = 1
+            logger.info(
+                'sellerType=%s filter active, appending filter_enum_business=%s',
+                seller_type, 1,
+            )
+        # 'any': no filter added
 
         for category_id in category_ids:
             yield from self._page_requests(
@@ -1039,6 +1071,29 @@ class OlxCarsSpider(scrapy.Spider):
 
         # ---- paramsRaw (pass-through) ---------------------------------------
         loader.add_value('paramsRaw', params)
+
+        # ---- extraAttributes (flat param dict, #25) -------------------------
+        # Flatten the params[] list into a {key: label} dict for easy access.
+        # Each param has a `key` (identifier) and a `value` which may be:
+        #   - dict with `label` string (standard OLX structure)
+        #   - scalar str/int/float (direct value)
+        #   - list (array-valued UA condition flags, BG feature lists) — skipped
+        # We skip list-valued params as they are already surfaced via `features`
+        # and `condition`. All other params are included verbatim — including
+        # keys already exposed as top-level fields (per §4 / Gate 1 approval).
+        extra_attrs: dict[str, str] = {}
+        for p in params:
+            p_key = p.get('key') or ''
+            p_value = p.get('value') or {}
+            if isinstance(p_value, dict):
+                label = p_value.get('label')
+                if label is not None:
+                    extra_attrs[p_key] = str(label)
+            elif isinstance(p_value, (str, int, float)):
+                # Scalar value — use it directly as a string
+                extra_attrs[p_key] = str(p_value)
+            # Non-dict, non-scalar (e.g. list) values: skip (too complex to flatten safely)
+        loader.add_value('extraAttributes', extra_attrs if extra_attrs else None)
 
         # ---- Promotion flags -----------------------------------------------
         promo = offer.get('promotion') or {}

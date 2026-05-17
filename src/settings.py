@@ -84,6 +84,11 @@ ITEM_PIPELINES = {
     # (registered by apply_apify_settings() at priority 1000), so its
     # priority is set between 100 and 1000.
     'src.pipelines.DropNonesPipeline': 500,
+    # FairPricePipeline buffers every item (after None-stripping at 500),
+    # raises DropItem so the Apify push pipeline at 1000 receives nothing,
+    # and stores the buffer in class attributes for main.py to read after
+    # the crawl, compute per-bucket medians, and push enriched items directly.
+    'src.pipelines.FairPricePipeline': 600,
 }
 
 # ---------------------------------------------------------------------------

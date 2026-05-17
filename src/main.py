@@ -24,7 +24,9 @@ from apify.scrapy import apply_apify_settings
 from scrapy.crawler import CrawlerRunner
 from scrapy.utils.defer import deferred_to_future
 
-from .pipelines import IncrementalDiffPipeline, _drop_nones
+import statistics
+
+from .pipelines import FairPricePipeline, IncrementalDiffPipeline, _drop_nones
 from .spiders.olx_cars import OlxCarsSpider
 
 
@@ -130,6 +132,7 @@ async def main() -> None:
                 'priceFrom': actor_input.get('priceFrom'),
                 'priceTo': actor_input.get('priceTo'),
                 'priceCurrency': actor_input.get('priceCurrency', 'EUR'),
+                'sellerType': actor_input.get('sellerType', 'any'),
                 'sortBy': sort_by,
                 'maxItems': max_items,
                 # --- Incremental mode fields ---
@@ -149,6 +152,8 @@ async def main() -> None:
         IncrementalDiffPipeline.updated_snapshot = {}
         IncrementalDiffPipeline.seen_offer_ids = set()
         IncrementalDiffPipeline.was_truncated = False
+        FairPricePipeline.items_buffer = []
+        FairPricePipeline.keys_buffer = []
 
         # --- Run the spider ---
         crawler_runner = CrawlerRunner(settings)
@@ -192,6 +197,68 @@ async def main() -> None:
                     'state key %r. Next run will emit changes.',
                     len(updated_snapshot), state_key,
                 )
+
+        # --- Post-crawl: fair-price median enrichment + push (#18) ---
+        # FairPricePipeline buffered all items (dropped them from the Apify push
+        # pipeline at priority 1000). We now compute per-bucket medians and push
+        # each enriched item directly. Items whose bucket has < min_bucket_size
+        # entries receive no priceVsMedianPct / priceRating (fields simply absent).
+        buffered_items = FairPricePipeline.items_buffer
+        buffered_keys = FairPricePipeline.keys_buffer
+
+        if buffered_items:
+            # Collect prices per bucket
+            buckets: dict = {}
+            for item, key in zip(buffered_items, buffered_keys):
+                if key is not None and item.get('price') is not None:
+                    try:
+                        buckets.setdefault(key, []).append(float(item['price']))
+                    except (TypeError, ValueError):
+                        pass
+
+            medians: dict = {
+                k: statistics.median(prices)
+                for k, prices in buckets.items()
+                if len(prices) >= FairPricePipeline.min_bucket_size
+            }
+
+            dataset = await Actor.open_dataset()
+            push_failed = False
+            enriched_count = 0
+            for item, key in zip(buffered_items, buffered_keys):
+                if key is not None and key in medians:
+                    median = medians[key]
+                    try:
+                        price_f = float(item['price'])
+                        pct = round((price_f - median) / median * 100.0, 2)
+                        item['priceVsMedianPct'] = pct
+                        item['priceRating'] = FairPricePipeline._pct_to_rating(pct)
+                        enriched_count += 1
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        # Numeric corruption; leave the fields absent
+                        pass
+                try:
+                    await dataset.push_data(item)
+                except Exception as exc:
+                    push_failed = True
+                    Actor.log.error(
+                        'FairPricePipeline push failed for offerId=%s: %s',
+                        item.get('offerId'), exc,
+                    )
+
+            if push_failed:
+                # Surface via class attribute pattern (consistent with
+                # FailOnItemErrorExtension and existing failure path)
+                OlxCarsSpider.crawl_failed = True
+
+            Actor.log.info(
+                'FairPricePipeline: pushed %d items, %d buckets >= %d, '
+                '%d items enriched with fair-price fields.',
+                len(buffered_items),
+                len(medians),
+                FairPricePipeline.min_bucket_size,
+                enriched_count,
+            )
 
         # --- Check for fatal errors ---
         # CRITICAL: access OlxCarsSpider.crawl_failed as a CLASS attribute.

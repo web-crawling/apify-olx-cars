@@ -30,10 +30,14 @@ input_data.setdefault("brands", [])
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 from src.spiders.olx_cars import OlxCarsSpider
+from src.pipelines import FairPricePipeline
 
 settings = get_project_settings()
 settings.setmodule("src.settings")
 settings.set("INPUT_DATA", input_data, priority="spider")
+# FEEDS kept for compatibility — but FairPricePipeline raises DropItem for every
+# item, so the FEEDS file stays empty. Items are read from the class-attribute
+# buffer after the crawl (mirrors production path in main.py).
 settings.set("FEEDS", {out_file: {"format": "jsonlines", "overwrite": True}}, priority="spider")
 settings.set("LOG_LEVEL", "WARNING")
 settings.set(
@@ -42,15 +46,26 @@ settings.set(
         "src.pipelines.MaxItemsPipeline": 100,
         "src.pipelines.IncrementalDiffPipeline": 200,
         "src.pipelines.DropNonesPipeline": 500,
+        # FairPricePipeline included to match the production pipeline chain.
+        # Items are buffered (DropItem raised) — FEEDS writer receives nothing.
+        "src.pipelines.FairPricePipeline": 600,
     },
     priority="spider",
 )
 
 OlxCarsSpider.crawl_failed = False
+FairPricePipeline.items_buffer = []
+FairPricePipeline.keys_buffer = []
 
 process = CrawlerProcess(settings)
 process.crawl(OlxCarsSpider)
 process.start()
+
+# Write buffered items to out_file (FEEDS file is empty — FairPricePipeline
+# consumed all items with DropItem before the FEEDS writer could see them).
+with open(out_file, "w", encoding="utf-8") as _f:
+    for _item in FairPricePipeline.items_buffer:
+        _f.write(json.dumps(_item, ensure_ascii=False) + "\n")
 
 result = {
     "crawl_failed": OlxCarsSpider.crawl_failed,

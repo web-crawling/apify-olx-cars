@@ -24,7 +24,7 @@ from apify.scrapy import apply_apify_settings
 from scrapy.crawler import CrawlerRunner
 from scrapy.utils.defer import deferred_to_future
 
-from .pipelines import IncrementalDiffPipeline
+from .pipelines import IncrementalDiffPipeline, _drop_nones
 from .spiders.olx_cars import OlxCarsSpider
 
 
@@ -174,8 +174,10 @@ async def main() -> None:
             if missing_items:
                 dataset = await Actor.open_dataset()
                 for missing_item in missing_items:
+                    # MISSING items bypass Scrapy pipelines — strip Nones manually
+                    # here, otherwise Apify schema-validates and rejects.
                     missing_item['isRepost'] = False
-                    await dataset.push_data(missing_item)
+                    await dataset.push_data(_drop_nones(missing_item))
                 Actor.log.info(
                     'Incremental mode: emitted %d MISSING items.', len(missing_items)
                 )

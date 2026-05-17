@@ -273,7 +273,7 @@ Every output item is a JSON object. All fields are always present -- fields with
 | `mileageKm` | integer | YES | Mileage in km (UA normalised from thousands) |
 | `fuelType` | string | YES | Normalised: `petrol`, `diesel`, `electric`, `hybrid`, `lpg`, `other` |
 | `transmission` | string | YES | Normalised: `manual`, `automatic`, `semi-automatic`, `other` |
-| `bodyType` | string | YES | Normalised: `sedan`, `suv`, `hatchback`, `estate`, `coupe`, `convertible`, `pickup`, `mpv`, `other`. Always `null` for BG -- see Limitations. |
+| `bodyType` | string | YES | Normalised: `sedan`, `suv`, `hatchback`, `estate`, `coupe`, `convertible`, `pickup`, `mpv`, `other`. Effectively always `"other"` for BG -- see Limitations. |
 | `condition` | string | YES | Normalised: `used`, `new`, `damaged` |
 | `engineCapacityCm3` | integer | YES | Engine displacement in cm3 (UA normalised from litres; KZ data quality warning -- see Limitations) |
 | `powerHp` | integer | YES | Engine power in HP |
@@ -541,7 +541,7 @@ Adding `emitMissing: true` causes the actor to also emit items with `changeType:
 
 **PT standvirtual cross-listings are skipped.** Some olx.pt listings link out to standvirtual.com (a sister site in the same OLX group). These offers are silently skipped and a count is logged at run end (e.g. "Skipped 3 offers on olx.pt that link to standvirtual.com"). Genuine olx.pt-native listings are unaffected.
 
-**Unmapped brand names fall back to the parent category.** Every country ships with a brand map (44–74 brands per country), but the OLX brand taxonomy is long-tailed — rare model lines, kit cars, and short-lived marques may not be in the bundled map. When a brand name is not found, the actor logs a warning with the list of recognised brands for that country and falls back to scraping the parent cars category. Brand filtering does not apply for the fallback path, but the rest of the scrape proceeds normally. Brand maps are refreshed quarterly.
+**Unmapped brand names fall back to the parent category.** Every country ships with a brand map (41–74 brands per country), but the OLX brand taxonomy is long-tailed — rare model lines, kit cars, and short-lived marques may not be in the bundled map. When a brand name is not found, the actor logs a warning with the list of recognised brands for that country and falls back to scraping the parent cars category. Brand filtering does not apply for the fallback path, but the rest of the scrape proceeds normally. Brand maps are refreshed quarterly.
 
 **KZ engine size data quality.** Kazakhstan sellers are inconsistent about whether they enter engine displacement in litres or cm3 in the OLX platform. The actor returns the value as provided by OLX without conversion.
 
@@ -552,7 +552,7 @@ Practical guidance for KZ engine-size data:
 - **Filter by `engineCapacityCm3 < 50`** to identify rows where the seller entered litres. Reinterpret those values as litres (multiply by 1,000 to get cm³) in your downstream processing.
 - **Read `paramsRaw`** and look for the entry whose label contains `"см³"` (Cyrillic for cm³) -- the numeric part of that label is the seller's raw input, which you can parse independently of the normalised field.
 
-**BG body type unavailable.** On `olx.bg`, the `type` parameter used by the OLX API returns condition-state flags (`technically-upright`, `service-book`, `with-mileage`, `with-improvements`) rather than body-shape values. This is a platform-level constraint on olx.bg, not a spider bug. As a result, every Bulgarian listing has `bodyType: null` in the output.
+**BG body type unavailable.** On `olx.bg`, the `type` parameter used by the OLX API returns condition-state flags (`technically-upright`, `service-book`, `with-mileage`, `with-improvements`) rather than body-shape values. This is a platform-level constraint on olx.bg, not a spider bug. The `BODY_NORMALIZATION` map intentionally has no entry for any of these BG-specific flags, so the normalisation step emits the default value `"other"` for every Bulgarian listing. Treat `bodyType: "other"` on `country: "bg"` as "unknown", not as a literal body-shape classification.
 
 If you need a heuristic body-type classification for BG listings, read the `paramsRaw` field and inspect any entry with `key: "type"`. The condition flags present there can sometimes serve as weak signals (e.g. `"technically-upright"` is more common among sedans and SUVs), but there is no reliable automated mapping. Body type is available and accurate for all other supported countries.
 

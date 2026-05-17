@@ -221,7 +221,6 @@ class OlxCarsSpider(scrapy.Spider):
     name = 'olx_cars'
 
     # Class-level flag — set True on fatal error; checked by main.py after crawl.
-    # Class-level flag — set True on fatal error; checked by main.py after crawl.
     # CRITICAL: must remain a CLASS attribute (not an instance attribute).
     # CrawlerRunner.crawl() returns a Deferred that resolves to None, not the
     # spider instance — so main.py can never access an instance attribute after

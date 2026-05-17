@@ -2,14 +2,42 @@
 
 The OLX Car Listings Scraper extracts vehicle classifieds from six OLX country sites -- Romania (olx.ro), Poland (olx.pl), Bulgaria (olx.bg), Portugal (olx.pt), Ukraine (olx.ua), and Kazakhstan (olx.kz) -- through a single unified JSON output. Filter by brand, year, price range, and currency, or pass pre-filtered OLX search URLs directly. No proxy subscription is required: the actor calls OLX's public `/api/v1/offers/` endpoint with conservative per-domain concurrency.
 
+## Open in AI Assistants
+
+Use this actor in your AI workflow -- paste the actor URL and ask for help:
+
+[![Open in ChatGPT](https://img.shields.io/badge/ChatGPT-Open-74aa9c?logo=openai&logoColor=white)](https://chat.openai.com/?prompt=Scrape%20car%20listings%20from%20OLX%20across%20Romania%2C%20Poland%2C%20Bulgaria%2C%20Portugal%2C%20Ukraine%2C%20and%20Kazakhstan%20using%20the%20extractify-labs%2Folx-cars%20Apify%20actor.%20Show%20me%20how%20to%20call%20it%20and%20parse%20the%20output.)
+[![Open in Claude](https://img.shields.io/badge/Claude-Open-d4a853?logo=anthropic&logoColor=white)](https://claude.ai/new?q=Scrape%20car%20listings%20from%20OLX%20across%20Romania%2C%20Poland%2C%20Bulgaria%2C%20Portugal%2C%20Ukraine%2C%20and%20Kazakhstan%20using%20the%20extractify-labs%2Folx-cars%20Apify%20actor.%20Show%20me%20how%20to%20call%20it%20and%20parse%20the%20output.)
+[![Open in Perplexity](https://img.shields.io/badge/Perplexity-Open-20808d?logo=perplexity&logoColor=white)](https://www.perplexity.ai/?q=Scrape%20car%20listings%20from%20OLX%20across%20Romania%2C%20Poland%2C%20Bulgaria%2C%20Portugal%2C%20Ukraine%2C%20and%20Kazakhstan%20using%20the%20extractify-labs%2Folx-cars%20Apify%20actor.%20Show%20me%20how%20to%20call%20it%20and%20parse%20the%20output.)
+[![Open in Copilot](https://img.shields.io/badge/Copilot-Open-0078d4?logo=microsoft&logoColor=white)](https://copilot.microsoft.com/?q=Scrape%20car%20listings%20from%20OLX%20across%20Romania%2C%20Poland%2C%20Bulgaria%2C%20Portugal%2C%20Ukraine%2C%20and%20Kazakhstan%20using%20the%20extractify-labs%2Folx-cars%20Apify%20actor.%20Show%20me%20how%20to%20call%20it%20and%20parse%20the%20output.)
+
+## Quickstart: Paste a Search URL
+
+The fastest way to start is to paste any OLX cars search URL you already have:
+
+1. Go to the OLX site for your country (e.g. [olx.ro/auto-masini-moto-ambarcatiuni/autoturisme/](https://www.olx.ro/auto-masini-moto-ambarcatiuni/autoturisme/)) and apply filters in the browser (brand, year, price, fuel type, etc.).
+2. Copy the URL from the address bar -- for example: `https://www.olx.ro/auto-masini-moto-ambarcatiuni/autoturisme/?search%5Bfilter_float_price%3Afrom%5D=5000&search%5Bfilter_float_price%3Ato%5D=15000`
+3. Paste it into the actor's `startUrls` input as a `{ "url": "..." }` object:
+
+```json
+{
+  "startUrls": [
+    { "url": "https://www.olx.ro/auto-masini-moto-ambarcatiuni/autoturisme/?search%5Bfilter_float_price%3Afrom%5D=5000&search%5Bfilter_float_price%3Ato%5D=15000" }
+  ],
+  "maxItems": 200
+}
+```
+
+The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx.pl` → Poland, etc.) and paginates through all results matching your filters up to `maxItems`. No other configuration is needed.
+
 ## Quick Facts
 
 - **What it does:** Scrapes car and vehicle listings from OLX classifieds in six countries.
 - **Countries supported:** Romania (olx.ro), Poland (olx.pl), Bulgaria (olx.bg), Portugal (olx.pt), Ukraine (olx.ua), Kazakhstan (olx.kz).
-- **Not yet supported:** Brazil (olx.com.br) -- runs on a different stack with Cloudflare protection; a separate actor `apify-olx-cars-br` is on the roadmap.
+- **Not yet supported:** Brazil (olx.com.br) -- runs on a different stack with Cloudflare protection; a separate actor is on the roadmap.
 - **Data source:** OLX's public `/api/v1/offers/` JSON endpoint.
 - **Proxy required:** No.
-- **Output:** JSON, 50 fields per listing including price, make, model, year, mileage, fuel, transmission, body type, seller info, location, and photo URLs.
+- **Output:** JSON -- 43 always-on top-level fields per listing (price, make, model, year, mileage, fuel, transmission, body type, seller info, location, photo URLs) plus 5 incremental-mode-only fields when `incrementalMode: true`.
 - **Throughput:** 40-65 listings per API call; one country's full structured-filter run typically returns up to 1,000 listings before the OLX cap.
 - **Coverage past 1,000 results:** automatic brand-level and year-band slicing when `maxItems > 1000`.
 - **Authentication:** none required -- runs against public listing endpoints.
@@ -22,22 +50,37 @@ The OLX Car Listings Scraper extracts vehicle classifieds from six OLX country s
 - **Price range filtering** -- filter by `priceFrom`/`priceTo` in any of seven supported currencies.
 - **Automatic slicing past the 1,000-result API cap** -- when `maxItems > 1000`, the actor fans out over brand-level and year-band sub-queries to maximise coverage.
 - **Normalised vehicle specs** -- `fuelType`, `transmission`, `bodyType`, and `condition` are mapped to consistent English enums across all six countries despite regional API vocabulary differences.
-- **50 output fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through.
+- **43 always-on top-level fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through.
 - **No proxy required** -- direct datacenter access to OLX's public API.
 - **Incremental monitoring mode** -- opt-in change tracking across runs; emit only new, updated, or missing listings instead of the full dataset every time.
 
+## How This Compares
+
+The table below compares this actor against alternative options for scraping OLX and similar classified-car sites. Values are based on information publicly available on each actor's Apify Store page at the time of writing; check each actor page for current details.
+
+| Feature | olx-cars (this actor) | OLX product search | Mobile.de | Otomoto | AutoScout24 |
+|---|---|---|---|---|---|
+| Countries | 6 OLX domains (RO, PL, BG, PT, UA, KZ) | — | Germany only | Poland only | — |
+| Proxy required | No | — | — | — | — |
+| Output fields | 43 always-on + 5 incremental | — | — | — | — |
+| Incremental / change-tracking mode | Yes | — | — | — | — |
+| Price history per listing | Yes | — | — | — | — |
+| No authentication required | Yes | — | — | — | — |
+
+> **Note:** Cells marked `—` could not be verified at time of writing. See each actor's store page for current details.
+
 ## Supported Countries
 
-| Country | Domain | Typical currency | Brand map status |
-|---------|--------|-----------------|-----------------|
-| Romania | olx.ro | EUR, RON | Partial (initial brands; grows quarterly) |
-| Poland | olx.pl | PLN | Partial (initial brands; grows quarterly) |
-| Bulgaria | olx.bg | BGN | Partial (initial brands; grows quarterly) |
-| Portugal | olx.pt | EUR | Not yet built -- brand filter falls back to all cars |
-| Ukraine | olx.ua | USD, UAH | Not yet built -- brand filter falls back to all cars |
-| Kazakhstan | olx.kz | KZT | Not yet built -- brand filter falls back to all cars |
+| Country | Domain | Typical currency | Brands mapped |
+|---------|--------|-----------------|---------------|
+| Romania | olx.ro | EUR, RON | 44 |
+| Poland | olx.pl | PLN | 54 |
+| Bulgaria | olx.bg | BGN | 74 |
+| Portugal | olx.pt | EUR | 52 |
+| Ukraine | olx.ua | USD, UAH | 51 |
+| Kazakhstan | olx.kz | KZT | 41 |
 
-**Brand map note:** The actor uses a bundled `brand_categories.json` file to resolve brand names to per-country OLX category IDs. RO, PL, and BG have partial maps covering the most common brands. PT, UA, and KZ maps are not yet fully populated -- if you supply a `brands` filter for these countries and the brand is not in the map, the actor logs a warning and falls back to scraping the parent cars category (which is still useful but not brand-filtered). The brand map will be expanded in each quarterly release.
+**Brand map note:** The actor ships with a bundled `brand_categories.json` file that resolves brand names to per-country OLX category IDs across all six countries (316 brand-leaves total). Each country is discovered independently — OLX taxonomy diverges between domains beyond a small legacy range (for example, Dacia is category `742` on olx.ro but `1347` on olx.pl), so the maps are not shared. Maps are refreshed quarterly via a listing-discovery script; rare brand-leaves that rotate in or out of the listing sample are preserved across refreshes. If you supply a brand name that is not in the map for your selected country, the actor logs a warning listing the recognised brands and falls back to the parent cars category — brand filtering does not apply in that case, but the rest of the scrape proceeds normally.
 
 ### Country notes
 
@@ -45,17 +88,17 @@ The OLX Car Listings Scraper extracts vehicle classifieds from six OLX country s
 
 **Poland (olx.pl)** -- Large market with PLN pricing. Provides `vin`, `drivetrain`, and `steeringWheelSide` fields not available in all countries. VIN disclosure rate is higher in PL than other markets.
 
-**Bulgaria (olx.bg)** -- Returns comprehensive feature checklists (comfort, multimedia, safety) merged into the `features` array. BG body type data quality is lower than other markets -- body type returns `"other"` for some listings where OLX BG uses the body-type param field for condition flags rather than body shape.
+**Bulgaria (olx.bg)** -- Returns comprehensive feature checklists (comfort, multimedia, safety) merged into the `features` array. See the Limitations section for a note on body type availability in BG.
 
 **Portugal (olx.pt)** -- Provides `co2Emissions`, `seatCount`, and `countryOfOrigin` fields. Note: olx.pt hosts cross-listings from standvirtual.com (a sister site). Listings where the offer links out to standvirtual.com are silently skipped; the actor logs a count of skipped offers at run end.
 
 **Ukraine (olx.ua)** -- Mileage is reported by sellers in thousands of km; the actor normalises this to km automatically (e.g. 139 thou = 139,000 km). Engine capacity is reported in litres and normalised to cm3 (e.g. 1.4 L = 1,400 cm3). Provides `drivetrain`, `doorCount`, `seatCount`, `customsCleared` fields.
 
-**Kazakhstan (olx.kz)** -- Provides `ownersCount`. Engine size data quality is inconsistent: some sellers enter the value in litres (e.g. `2`), others in cm3 (e.g. `2300`). The actor returns the value exactly as OLX provides it -- see the Limitations section for details.
+**Kazakhstan (olx.kz)** -- Provides `ownersCount`. Engine size data quality is inconsistent: some sellers enter the value in litres (e.g. `2`), others in cm3 (e.g. `2300`). The actor returns the value exactly as OLX provides it -- see the Limitations section for details and a worked example.
 
 ## Brazil (olx.com.br) -- Not Available in v1
 
-Brazil is explicitly excluded from this actor. The olx.com.br platform requires Playwright rendering and residential proxy access due to Cloudflare TLS-fingerprint blocking on datacenter IPs. The cost per run would be approximately $800 -- not viable at typical per-result pricing. A dedicated actor (`apify-olx-cars-br`) using Playwright and residential proxy is on the roadmap as a separate product. Do not set `country` to `"br"` -- it is not in the input enum and the actor will reject the input.
+Brazil is explicitly excluded from this actor. The olx.com.br platform requires Playwright rendering and residential proxy access due to Cloudflare TLS-fingerprint blocking on datacenter IPs. The cost per run would be approximately $800 -- not viable at typical per-result pricing. A dedicated actor using Playwright and residential proxy is on the roadmap as a separate product. Do not set `country` to `"br"` -- it is not in the input enum and the actor will reject the input.
 
 ## Quick Start
 
@@ -230,9 +273,9 @@ Every output item is a JSON object. All fields are always present -- fields with
 | `mileageKm` | integer | YES | Mileage in km (UA normalised from thousands) |
 | `fuelType` | string | YES | Normalised: `petrol`, `diesel`, `electric`, `hybrid`, `lpg`, `other` |
 | `transmission` | string | YES | Normalised: `manual`, `automatic`, `semi-automatic`, `other` |
-| `bodyType` | string | YES | Normalised: `sedan`, `suv`, `hatchback`, `estate`, `coupe`, `convertible`, `pickup`, `mpv`, `other` |
+| `bodyType` | string | YES | Normalised: `sedan`, `suv`, `hatchback`, `estate`, `coupe`, `convertible`, `pickup`, `mpv`, `other`. Effectively always `"other"` for BG -- see Limitations. |
 | `condition` | string | YES | Normalised: `used`, `new`, `damaged` |
-| `engineCapacityCm3` | integer | YES | Engine displacement in cm3 (UA normalised from litres) |
+| `engineCapacityCm3` | integer | YES | Engine displacement in cm3 (UA normalised from litres; KZ data quality warning -- see Limitations) |
 | `powerHp` | integer | YES | Engine power in HP |
 | `color` | string | YES | English color slug |
 | `vin` | string | YES | VIN number (PL, UA, BG only; when disclosed) |
@@ -298,7 +341,7 @@ Analyse how listing attributes correlate with time-on-market or perceived listin
 
 ### Feeding LLM and ML Pipelines with Structured Vehicle Data
 
-Use the JSON dataset directly as a training or RAG source for automotive chatbots and pricing models. Every output item is a flat JSON object with 50 well-typed fields (no nested HTML strings; description is plain text with HTML stripped). The actor's dataset can be exported as JSON, CSV, Excel, or pulled via the Apify API for incremental ingestion.
+Use the JSON dataset directly as a training or RAG source for automotive chatbots and pricing models. Every output item is a flat JSON object with well-typed fields (no nested HTML strings; description is plain text with HTML stripped). The actor's dataset can be exported as JSON, CSV, Excel, or pulled via the Apify API for incremental ingestion.
 
 ## Pricing
 
@@ -498,9 +541,20 @@ Adding `emitMissing: true` causes the actor to also emit items with `changeType:
 
 **PT standvirtual cross-listings are skipped.** Some olx.pt listings link out to standvirtual.com (a sister site in the same OLX group). These offers are silently skipped and a count is logged at run end (e.g. "Skipped 3 offers on olx.pt that link to standvirtual.com"). Genuine olx.pt-native listings are unaffected.
 
-**Brand map is partial for PT, UA, and KZ.** The bundled brand map used to resolve brand names to per-country category IDs is not yet fully populated for Portugal, Ukraine, and Kazakhstan. When a brand is not found in the map for the selected country, the actor logs a warning and falls back to the parent cars category. Brand filtering still works -- it just doesn't restrict to brand-specific sub-category IDs. Full brand maps will be populated before the next major release.
+**Unmapped brand names fall back to the parent category.** Every country ships with a brand map (41–74 brands per country), but the OLX brand taxonomy is long-tailed — rare model lines, kit cars, and short-lived marques may not be in the bundled map. When a brand name is not found, the actor logs a warning with the list of recognised brands for that country and falls back to scraping the parent cars category. Brand filtering does not apply for the fallback path, but the rest of the scrape proceeds normally. Brand maps are refreshed quarterly.
 
-**KZ engine size data quality.** Kazakhstan sellers are inconsistent about whether they enter engine displacement in litres or cm3 in the OLX platform. The actor returns the value as provided by OLX. A listing showing `engineCapacityCm3: 2` likely means the seller entered `2` (intended as 2 litres = 2,000 cm3) rather than a literal 2 cm3. Use `paramsRaw` to inspect the raw value and label from OLX directly.
+**KZ engine size data quality.** Kazakhstan sellers are inconsistent about whether they enter engine displacement in litres or cm3 in the OLX platform. The actor returns the value as provided by OLX without conversion.
+
+A worked example: a listing where the seller typed `2` into the engine-size field will appear in the output as `"engineCapacityCm3": 2` and the raw `paramsRaw` entry will carry the label `"2 см³"`. The seller almost certainly meant 2.0 litres (= 2,000 cm³), not a literal 2 cm³.
+
+Practical guidance for KZ engine-size data:
+
+- **Filter by `engineCapacityCm3 < 50`** to identify rows where the seller entered litres. Reinterpret those values as litres (multiply by 1,000 to get cm³) in your downstream processing.
+- **Read `paramsRaw`** and look for the entry whose label contains `"см³"` (Cyrillic for cm³) -- the numeric part of that label is the seller's raw input, which you can parse independently of the normalised field.
+
+**BG body type unavailable.** On `olx.bg`, the `type` parameter used by the OLX API returns condition-state flags (`technically-upright`, `service-book`, `with-mileage`, `with-improvements`) rather than body-shape values. This is a platform-level constraint on olx.bg, not a spider bug. The `BODY_NORMALIZATION` map intentionally has no entry for any of these BG-specific flags, so the normalisation step emits the default value `"other"` for every Bulgarian listing. Treat `bodyType: "other"` on `country: "bg"` as "unknown", not as a literal body-shape classification.
+
+If you need a heuristic body-type classification for BG listings, read the `paramsRaw` field and inspect any entry with `key: "type"`. The condition flags present there can sometimes serve as weak signals (e.g. `"technically-upright"` is more common among sedans and SUVs), but there is no reliable automated mapping. Body type is available and accurate for all other supported countries.
 
 **`make` field is null in startUrls / parent-category mode.** The `make` field is populated from OLX's category metadata (`cat_l2_name`), which is only present in brand-leaf category responses. When using `startUrls` pointing to a parent category URL (not a brand-specific sub-category), or when a brand is not found in the brand map, `make` will be null. `model` and other fields extracted from per-listing `params` are unaffected.
 
@@ -509,16 +563,16 @@ Adding `emitMissing: true` causes the actor to also emit items with `changeType:
 ## Frequently Asked Questions
 
 **What is the OLX Car Listings Scraper?**
-The OLX Car Listings Scraper is an Apify actor that extracts car and vehicle listings from OLX classifieds sites in Romania, Poland, Bulgaria, Portugal, Ukraine, and Kazakhstan. It returns structured JSON with 50 fields per listing including price, make, model, year, mileage, fuel type, seller info, and location.
+The OLX Car Listings Scraper is an Apify actor that extracts car and vehicle listings from OLX classifieds sites in Romania, Poland, Bulgaria, Portugal, Ukraine, and Kazakhstan. It returns structured JSON with 43 always-on fields per listing including price, make, model, year, mileage, fuel type, seller info, and location. An additional 5 fields are added when `incrementalMode: true`.
 
 **Which OLX country sites does this actor support?**
 Romania (olx.ro), Poland (olx.pl), Bulgaria (olx.bg), Portugal (olx.pt), Ukraine (olx.ua), and Kazakhstan (olx.kz). Pass the `country` parameter to select a country, or use `startUrls` to provide a direct OLX URL -- the country is inferred from the domain automatically.
 
 **Does this actor work with OLX Brazil (olx.com.br)?**
-No. Brazil is not in v1. The olx.com.br platform uses a different technical stack with Cloudflare TLS-fingerprint blocking that requires Playwright and residential proxy -- a dedicated `apify-olx-cars-br` actor is planned for the roadmap.
+No. Brazil is not in v1. The olx.com.br platform uses a different technical stack with Cloudflare TLS-fingerprint blocking that requires Playwright and residential proxy -- a dedicated actor is planned for the roadmap.
 
 **What car data does the actor extract?**
-The actor returns 50 fields grouped into: identification (offerId, url, title, description), pricing (price, currency, priceNegotiable, pricePrevious, priceConverted), vehicle specs (make, model, year, mileageKm, fuelType, transmission, bodyType, condition, engineCapacityCm3, powerHp, color, vin, features), country-specific fields (drivetrain, steeringWheelSide, doorCount, seatCount, registrationStatus, co2Emissions, etc.), seller info, location with GPS, photos, timestamps, and a `paramsRaw` pass-through of all raw API parameters.
+The actor returns 43 always-on fields grouped into: identification (offerId, url, title, description), pricing (price, currency, priceNegotiable, pricePrevious, priceConverted), vehicle specs (make, model, year, mileageKm, fuelType, transmission, bodyType, condition, engineCapacityCm3, powerHp, color, vin, features), country-specific fields (drivetrain, steeringWheelSide, doorCount, seatCount, registrationStatus, co2Emissions, etc.), seller info, location with GPS, photos, timestamps, and a `paramsRaw` pass-through of all raw API parameters.
 
 **Does this actor return seller phone numbers?**
 No. The actor returns `seller.hasPhone` as a boolean only -- `true` means the seller accepts phone contact, but the phone number itself is not extracted in v1. Retrieving the phone number requires a separate authenticated API call.
@@ -533,7 +587,7 @@ OLX's API rejects pagination requests beyond offset 1,000 with HTTP 400. A singl
 Yes. Set `brands` to an array of brand names (e.g. `["BMW", "Toyota"]`), `yearFrom`/`yearTo` for year range, and `priceFrom`/`priceTo`/`priceCurrency` for price range. All filters can be combined. Filters are ignored when `startUrls` is provided.
 
 **How do I scrape a pre-filtered OLX search URL?**
-Go to the OLX website for your country, apply the filters you want (brand, year, price, etc.) using the site's own interface, then copy the resulting search URL. Paste it as a `{ "url": "..." }` object in the `startUrls` array. The actor will paginate through all results from that pre-filtered URL up to `maxItems`.
+Go to the OLX website for your country, apply the filters you want (brand, year, price, etc.) using the site's own interface, then copy the resulting search URL. Paste it as a `{ "url": "..." }` object in the `startUrls` array. The actor will paginate through all results from that pre-filtered URL up to `maxItems`. The country is auto-detected from the hostname -- no additional configuration needed.
 
 **What output formats are supported?**
 The actor outputs structured JSON to Apify's dataset. From the Apify console or via the API, you can export as JSON, CSV, Excel (XLSX), or XML. The dataset also integrates with Google Sheets via the Apify Google Sheets integration and any HTTP-based integration via the Apify API.
@@ -548,7 +602,7 @@ The actor scrapes only publicly accessible listing data -- the same data visible
 The actor returns 40-65 listings per API call. Concurrency per domain ranges from 4 concurrent requests (Bulgaria, with a 0.25s delay) to 8 concurrent requests (all other countries, with a 0.10s delay). A standard 1,000-listing run typically completes in under 2 minutes. Full-enumeration runs (`maxItems > 1000`) take longer due to the additional sub-query slices.
 
 **Why was Romania chosen as the default country?**
-Romania has the highest car-listing volume among the supported countries and the broadest brand coverage in the initial brand map. EUR pricing is common in RO, making it easy to compare prices across European markets without currency conversion. `"ro"` as the default also means the quickest path to a working first run for most users.
+Romania has the highest car-listing volume among the supported countries (approximately 128,000 active listings) and EUR pricing is common in RO, which makes it easy to compare prices across European markets without currency conversion. `"ro"` as the default also means the quickest path to a working first run for most users.
 
 **Why does my first run with incremental mode show 0 items?**
 This is expected. The first run with `incrementalMode: true` builds the baseline snapshot and emits nothing to the dataset. Run the actor a second time with the same `stateKey` and it will emit only listings that are new or changed since the first run. See the Incremental Monitoring section for details.

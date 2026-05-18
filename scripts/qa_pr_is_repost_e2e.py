@@ -78,6 +78,12 @@ class FakeSettings(dict):
         return super().get(key, default)
 
 
+class FakeCrawler:
+    """Minimal crawler stub for from_crawler."""
+    def __init__(self, input_data: dict):
+        self.settings = FakeSettings(INPUT_DATA=input_data)
+
+
 class FakeSpider:
     def __init__(self, input_data: dict):
         self.settings = FakeSettings(INPUT_DATA=input_data)
@@ -137,8 +143,7 @@ def run_pipeline(
     }
     spider = FakeSpider(input_data)
 
-    diff_pipeline = IncrementalDiffPipeline()
-    diff_pipeline.open_spider(spider)
+    diff_pipeline = IncrementalDiffPipeline.from_crawler(FakeCrawler(input_data))
 
     drop_pipeline = DropNonesPipeline()
 
@@ -148,8 +153,8 @@ def run_pipeline(
 
     for item in items:
         try:
-            result = diff_pipeline.process_item(item, spider)
-            result = drop_pipeline.process_item(result, spider)
+            result = diff_pipeline.process_item(item)
+            result = drop_pipeline.process_item(result)
             if isinstance(result, dict):
                 emitted_live.append(result)
             else:
@@ -517,11 +522,9 @@ _noinc_input = {
     "_snapshot": {},
     "_runTs": "2026-05-16T00:00:00+00:00",
 }
-_noinc_spider = FakeSpider(_noinc_input)
-_noinc_pipeline = _IDP()
-_noinc_pipeline.open_spider(_noinc_spider)
+_noinc_pipeline = _IDP.from_crawler(FakeCrawler(_noinc_input))
 _noinc_item = {"offerId": 777, "price": 5000, "currency": "EUR"}
-_noinc_result = _noinc_pipeline.process_item(_noinc_item, _noinc_spider)
+_noinc_result = _noinc_pipeline.process_item(_noinc_item)
 check("C7: isRepost absent when incrementalMode=False",
       "isRepost" not in _noinc_result,
       f"got isRepost={_noinc_result.get('isRepost')!r}")

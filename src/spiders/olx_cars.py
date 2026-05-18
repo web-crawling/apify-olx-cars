@@ -350,13 +350,17 @@ class OlxCarsSpider(scrapy.Spider):
 
         logger.info('OlxCarsSpider initialised.')
 
-    def start_requests(self) -> Generator:
+    async def start(self):
         """Build initial requests from actor input.
 
         Input is read from the Scrapy setting INPUT_DATA (a dict) which
         is populated by main.py before the crawl starts.
 
         Precedence: startUrls > structured filters.
+
+        This is an async def generator. ``yield from`` is not permitted inside
+        ``async def`` generators — all sub-generator calls use explicit
+        ``for req in ...: yield req`` loops.
         """
         input_data: dict[str, Any] = self.settings.get('INPUT_DATA') or {}
 
@@ -483,7 +487,7 @@ class OlxCarsSpider(scrapy.Spider):
                         )
                 # 'any': no filter added; URL-provided value: not overridden
 
-                yield from self._page_requests(
+                for req in self._page_requests(
                     domain=domain,
                     country=detected_country,
                     category_id=category_id,
@@ -492,7 +496,8 @@ class OlxCarsSpider(scrapy.Spider):
                     offset=0,
                     cat_l2_name=None,
                     slice_label=f'startUrl:{url[:60]}',
-                )
+                ):
+                    yield req
             return
 
         # -------------------------------------------------------------------
@@ -594,7 +599,7 @@ class OlxCarsSpider(scrapy.Spider):
         # 'any': no filter added
 
         for category_id in category_ids:
-            yield from self._page_requests(
+            for req in self._page_requests(
                 domain=domain,
                 country=country,
                 category_id=category_id,
@@ -603,7 +608,8 @@ class OlxCarsSpider(scrapy.Spider):
                 offset=0,
                 cat_l2_name=None,
                 slice_label=f'cat:{category_id}',
-            )
+            ):
+                yield req
 
     # ------------------------------------------------------------------
     # Request builder helpers

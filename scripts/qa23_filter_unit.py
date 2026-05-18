@@ -81,7 +81,7 @@ def item(country: str, condition: str = None, condition_raw=None, owners_count=N
 
 def expect_pass(pipeline, it, label):
     try:
-        result = pipeline.process_item(it, SPIDER)
+        result = pipeline.process_item(it)
         check(label, result is not None, "item returned")
     except DropItem:
         check(label, False, "unexpected DropItem raised")
@@ -89,7 +89,7 @@ def expect_pass(pipeline, it, label):
 
 def expect_drop(pipeline, it, label):
     try:
-        pipeline.process_item(it, SPIDER)
+        pipeline.process_item(it)
         check(label, False, "DropItem not raised — expected drop")
     except DropItem:
         check(label, True, "DropItem raised as expected")
@@ -101,7 +101,7 @@ def expect_drop(pipeline, it, label):
 print("\n--- 1. Both filters off ---")
 p = make_pipeline(False, False)
 it = item("ro", condition="damaged")
-result = p.process_item(it, SPIDER)
+result = p.process_item(it)
 check("both-off: damaged ro item passes through", result is it)
 
 # ---------------------------------------------------------------------------
@@ -125,15 +125,17 @@ print("\n--- 4. excludeDamaged=True, bg (unsupported) → pass + log ---")
 HistoryFilterPipeline.reset()
 p = make_pipeline(True, False)
 
-# Capture log
+# Capture log — _log_once now uses the module-level logger ('src.pipelines'),
+# not spider.logger, so attach the handler to that logger.
 log_records = []
 class CapturingHandler(logging.Handler):
     def emit(self, record):
         log_records.append(record.getMessage())
 
 handler = CapturingHandler()
-SPIDER.logger.addHandler(handler)
-SPIDER.logger.setLevel(logging.DEBUG)
+pipelines_logger = logging.getLogger('src.pipelines')
+pipelines_logger.addHandler(handler)
+pipelines_logger.setLevel(logging.DEBUG)
 
 expect_pass(p, item("bg", condition="used"), "bg used → pass (unsupported country)")
 bg_logs = [r for r in log_records if "excludeDamaged" in r and "bg" in r]
@@ -150,7 +152,7 @@ bg_logs2 = [r for r in log_records if "excludeDamaged" in r and "bg" in r]
 check("bg: no duplicate INFO log on second item", len(bg_logs2) == 0,
       f"found {len(bg_logs2)} log records (expected 0)")
 
-SPIDER.logger.removeHandler(handler)
+pipelines_logger.removeHandler(handler)
 
 # ---------------------------------------------------------------------------
 # 6. firstOwnerOnly = True, country=kz, ownersCount=1 → passes
@@ -210,28 +212,27 @@ print("\n--- 12. firstOwnerOnly=True, ro (unsupported) → pass + log ---")
 HistoryFilterPipeline.reset()
 p = make_pipeline(False, True)
 
-# Use a fresh capture list and a custom logger on the spider
+# _log_once now uses the module-level logger; capture from 'src.pipelines'.
 log_records_ro = []
+class CapturingHandler2(logging.Handler):
+    def emit(self, record):
+        log_records_ro.append(record.getMessage())
 
-class CapturingLogger:
-    def info(self, msg, *args):
-        text = msg % args if args else msg
-        log_records_ro.append(text)
-    def debug(self, *args, **kwargs):
-        pass
-
-class FakeSpiderRo:
-    logger = CapturingLogger()
+handler2 = CapturingHandler2()
+pipelines_logger2 = logging.getLogger('src.pipelines')
+pipelines_logger2.addHandler(handler2)
+pipelines_logger2.setLevel(logging.DEBUG)
 
 it_ro = item("ro", condition="used")
 try:
-    result_ro = p.process_item(it_ro, FakeSpiderRo())
+    result_ro = p.process_item(it_ro)
     check("ro (unsupported) → pass", result_ro is not None, "item returned")
 except DropItem:
     check("ro (unsupported) → pass", False, "unexpected DropItem")
 ro_logs = [r for r in log_records_ro if "firstOwnerOnly" in r and "ro" in r]
 check("ro: INFO log for firstOwnerOnly inapplicable", len(ro_logs) >= 1,
       f"found {len(ro_logs)} log records")
+pipelines_logger2.removeHandler(handler2)
 
 # ---------------------------------------------------------------------------
 # 13. R2: BG/UA missing conditionRaw → pass through (not drop)
@@ -252,7 +253,7 @@ expect_pass(p, it_ua_no_raw, "ua conditionRaw absent → pass through (R2 safety
 print("\n--- 15. reset() clears _logged_inapplicable ---")
 # First, populate the set
 p = make_pipeline(True, True)
-p.process_item(item("bg", condition="used"), SPIDER)  # logs bg/excludeDamaged
+p.process_item(item("bg", condition="used"))  # logs bg/excludeDamaged
 before = len(HistoryFilterPipeline._logged_inapplicable)
 HistoryFilterPipeline.reset()
 after = len(HistoryFilterPipeline._logged_inapplicable)
@@ -266,10 +267,10 @@ print("\n--- 16. _logged_inapplicable is class attribute, shared across instance
 HistoryFilterPipeline.reset()
 p1 = make_pipeline(True, False)
 p2 = make_pipeline(True, False)
-p1.process_item(item("bg", condition="used"), SPIDER)  # p1 logs bg
+p1.process_item(item("bg", condition="used"))  # p1 logs bg
 check("p1 log recorded in class attr", len(HistoryFilterPipeline._logged_inapplicable) > 0)
 size_before = len(HistoryFilterPipeline._logged_inapplicable)
-p2.process_item(item("bg", condition="used"), SPIDER)  # p2 should NOT add duplicate
+p2.process_item(item("bg", condition="used"))  # p2 should NOT add duplicate
 check("p2 does not double-log same cell",
       len(HistoryFilterPipeline._logged_inapplicable) == size_before,
       f"set size unchanged at {size_before}")

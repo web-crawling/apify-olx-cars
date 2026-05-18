@@ -62,17 +62,23 @@ class MaxItemsPipeline:
     (which Apify does not do in practice, but is defensive coding).
     """
 
-    def open_spider(self, spider) -> None:
-        input_data = spider.settings.get('INPUT_DATA') or {}
+    @classmethod
+    def from_crawler(cls, crawler):
+        obj = cls()
+        input_data = crawler.settings.get('INPUT_DATA') or {}
         max_items_raw = input_data.get('maxItems', 1000)
         try:
-            self.max_items: int = int(max_items_raw)
+            obj.max_items: int = int(max_items_raw)
         except (ValueError, TypeError):
-            self.max_items = 1000
-        self._count: int = 0
-        logger.info('MaxItemsPipeline: max_items=%d', self.max_items)
+            obj.max_items = 1000
+        obj._count: int = 0
+        logger.info('MaxItemsPipeline: max_items=%d', obj.max_items)
+        return obj
 
-    def process_item(self, item, spider):
+    def open_spider(self) -> None:
+        pass
+
+    def process_item(self, item):
         """Pass item through or raise CloseSpider when limit is hit."""
         self._count += 1
         if self._count > self.max_items:
@@ -117,19 +123,25 @@ class HistoryFilterPipeline:
         """Reset per-run class-level state. Called from open_spider and main.py."""
         cls._logged_inapplicable = set()
 
-    def open_spider(self, spider) -> None:
-        type(self).reset()
-        input_data = spider.settings.get('INPUT_DATA') or {}
-        self._exclude_damaged: bool = bool(input_data.get('excludeDamaged', False))
-        self._first_owner_only: bool = bool(input_data.get('firstOwnerOnly', False))
-        self._service_book_only: bool = bool(input_data.get('serviceBookOnly', False))
-        if self._exclude_damaged or self._first_owner_only or self._service_book_only:
+    @classmethod
+    def from_crawler(cls, crawler):
+        obj = cls()
+        obj.reset()
+        input_data = crawler.settings.get('INPUT_DATA') or {}
+        obj._exclude_damaged: bool = bool(input_data.get('excludeDamaged', False))
+        obj._first_owner_only: bool = bool(input_data.get('firstOwnerOnly', False))
+        obj._service_book_only: bool = bool(input_data.get('serviceBookOnly', False))
+        if obj._exclude_damaged or obj._first_owner_only or obj._service_book_only:
             logger.info(
                 'HistoryFilterPipeline: excludeDamaged=%s firstOwnerOnly=%s serviceBookOnly=%s',
-                self._exclude_damaged, self._first_owner_only, self._service_book_only,
+                obj._exclude_damaged, obj._first_owner_only, obj._service_book_only,
             )
+        return obj
 
-    def process_item(self, item, spider):
+    def open_spider(self) -> None:
+        pass
+
+    def process_item(self, item):
         if not (self._exclude_damaged or self._first_owner_only or self._service_book_only):
             return item
 
@@ -142,7 +154,7 @@ class HistoryFilterPipeline:
                 if self._is_damaged(d):
                     raise DropItem(f'HistoryFilter: excludeDamaged — offerId {d.get("offerId")}')
             else:
-                self._log_once(spider, 'excludeDamaged', country)
+                self._log_once('excludeDamaged', country)
 
         # --- firstOwnerOnly ---------------------------------------------------
         if self._first_owner_only:
@@ -150,7 +162,7 @@ class HistoryFilterPipeline:
                 if not self._is_first_owner(d, country):
                     raise DropItem(f'HistoryFilter: firstOwnerOnly — offerId {d.get("offerId")}')
             else:
-                self._log_once(spider, 'firstOwnerOnly', country)
+                self._log_once('firstOwnerOnly', country)
 
         # --- serviceBookOnly --------------------------------------------------
         if self._service_book_only:
@@ -158,7 +170,7 @@ class HistoryFilterPipeline:
                 if not self._has_service_book(d):
                     raise DropItem(f'HistoryFilter: serviceBookOnly — offerId {d.get("offerId")}')
             else:
-                self._log_once(spider, 'serviceBookOnly', country)
+                self._log_once('serviceBookOnly', country)
 
         return item
 
@@ -218,13 +230,13 @@ class HistoryFilterPipeline:
         return 'service-book' in parts
 
     @classmethod
-    def _log_once(cls, spider, filter_name: str, country: str) -> None:
+    def _log_once(cls, filter_name: str, country: str) -> None:
         """Emit a one-time INFO log for an inapplicable (filter, country) cell."""
         key = (filter_name, country)
         if key in cls._logged_inapplicable:
             return
         cls._logged_inapplicable.add(key)
-        spider.logger.info(
+        logger.info(
             "HistoryFilter: filter %r is not available on country %r "
             "(no OLX API signal). Items pass through unchanged for this country.",
             filter_name, country,
@@ -267,24 +279,30 @@ class IncrementalDiffPipeline:
     seen_offer_ids: set = set()
     was_truncated: bool = False
 
-    def open_spider(self, spider) -> None:
-        input_data = spider.settings.get('INPUT_DATA') or {}
-        self.incremental_mode = bool(input_data.get('incrementalMode', False))
-        self.emit_unchanged = bool(input_data.get('emitUnchanged', False))
-        self.emit_missing = bool(input_data.get('emitMissing', False))
-        self._max_items = int(input_data.get('maxItems', 1000))
+    @classmethod
+    def from_crawler(cls, crawler):
+        obj = cls()
+        input_data = crawler.settings.get('INPUT_DATA') or {}
+        obj.incremental_mode = bool(input_data.get('incrementalMode', False))
+        obj.emit_unchanged = bool(input_data.get('emitUnchanged', False))
+        obj.emit_missing = bool(input_data.get('emitMissing', False))
+        obj._max_items = int(input_data.get('maxItems', 1000))
         # Snapshot loaded by main.py and passed via INPUT_DATA['_snapshot']
-        self._snapshot = dict(input_data.get('_snapshot') or {})
-        self._run_ts = (
+        obj._snapshot = dict(input_data.get('_snapshot') or {})
+        obj._run_ts = (
             input_data.get('_runTs')
             or datetime.now(tz=timezone.utc).isoformat()
         )
         # Reset class attributes for this run (start from the loaded snapshot)
-        type(self).updated_snapshot = dict(self._snapshot)
-        type(self).seen_offer_ids = set()
-        type(self).was_truncated = False
+        cls.updated_snapshot = dict(obj._snapshot)
+        cls.seen_offer_ids = set()
+        cls.was_truncated = False
+        return obj
 
-    def process_item(self, item, spider):
+    def open_spider(self) -> None:
+        pass
+
+    def process_item(self, item):
         if not self.incremental_mode:
             return item  # pass-through; no change fields added
 
@@ -359,7 +377,7 @@ class DropNonesPipeline:
     behavior accepts them cleanly.
     """
 
-    def process_item(self, item, spider):
+    def process_item(self, item):
         cleaned = _drop_nones(ItemAdapter(item).asdict())
         return cleaned
 
@@ -396,13 +414,13 @@ class FairPricePipeline:
     keys_buffer: list = []
     min_bucket_size: int = 5  # minimum items per bucket for median to be emitted (was 10, tuned in PR #49)
 
-    def open_spider(self, spider) -> None:
+    def open_spider(self) -> None:
         # Reset class attributes for this run so stale data from a prior
         # run (e.g. if the process is reused) does not bleed in.
         type(self).items_buffer = []
         type(self).keys_buffer = []
 
-    def process_item(self, item, spider):
+    def process_item(self, item):
         """Stash item in class-level buffer; raise DropItem to prevent double-push.
 
         Items arrive here as plain dicts (output of DropNonesPipeline at 500).
@@ -498,39 +516,44 @@ class NotificationBufferPipeline:
     price_drop_buffer: list = []
     _counts: dict = {}
 
-    def open_spider(self, spider) -> None:
-        """Read notification input from INPUT_DATA; reset class-attribute buffers."""
-        # Defensive reset (mirrors FairPricePipeline.open_spider pattern).
+    @classmethod
+    def from_crawler(cls, crawler):
+        obj = cls()
+        # Defensive reset (mirrors FairPricePipeline pattern).
         # main.py also resets these before the crawl, but the pipeline-level
-        # reset guards against edge cases where open_spider fires multiple times.
-        type(self).new_items_buffer = []
-        type(self).price_drop_buffer = []
-        type(self)._counts = {}
+        # reset guards against edge cases where from_crawler fires multiple times.
+        cls.new_items_buffer = []
+        cls.price_drop_buffer = []
+        cls._counts = {}
 
-        input_data = spider.settings.get('INPUT_DATA') or {}
+        input_data = crawler.settings.get('INPUT_DATA') or {}
         notify_on = str(input_data.get('notifyOn') or 'none').lower()
 
         valid_notify_on = {'none', 'new_listings', 'price_drops', 'both'}
         if notify_on not in valid_notify_on:
             notify_on = 'none'
 
-        self._enabled: bool = notify_on in {'new_listings', 'price_drops', 'both'}
-        self._include_new: bool = notify_on in {'new_listings', 'both'}
-        self._include_drops: bool = notify_on in {'price_drops', 'both'}
+        obj._enabled: bool = notify_on in {'new_listings', 'price_drops', 'both'}
+        obj._include_new: bool = notify_on in {'new_listings', 'both'}
+        obj._include_drops: bool = notify_on in {'price_drops', 'both'}
 
         try:
-            self._min_pct: int = int(input_data.get('notifyMinPriceDropPct', 5))
+            obj._min_pct: int = int(input_data.get('notifyMinPriceDropPct', 5))
         except (TypeError, ValueError):
-            self._min_pct = 5
+            obj._min_pct = 5
 
-        if self._enabled:
+        if obj._enabled:
             logger.info(
                 'NotificationBufferPipeline: enabled — notifyOn=%r '
                 'include_new=%s include_drops=%s min_pct=%d',
-                notify_on, self._include_new, self._include_drops, self._min_pct,
+                notify_on, obj._include_new, obj._include_drops, obj._min_pct,
             )
+        return obj
 
-    def process_item(self, item, spider):
+    def open_spider(self) -> None:
+        pass
+
+    def process_item(self, item):
         """Observe item; update counts and buffers. Never raises DropItem."""
         if not self._enabled:
             return item
@@ -660,10 +683,12 @@ class OutputShapingPipeline:
     INPUT_DATA['descriptionMaxLength'] (default None) from the Scrapy settings.
     """
 
-    def open_spider(self, spider) -> None:
-        input_data = spider.settings.get('INPUT_DATA') or {}
+    @classmethod
+    def from_crawler(cls, crawler):
+        obj = cls()
+        input_data = crawler.settings.get('INPUT_DATA') or {}
         raw_mode = input_data.get('outputMode', 'full') or 'full'
-        self._output_mode: str = raw_mode if raw_mode in ('full', 'compact') else 'full'
+        obj._output_mode: str = raw_mode if raw_mode in ('full', 'compact') else 'full'
         if raw_mode not in ('full', 'compact'):
             logger.warning(
                 'OutputShapingPipeline: invalid outputMode %r — defaulting to "full".',
@@ -671,21 +696,25 @@ class OutputShapingPipeline:
             )
         raw_len = input_data.get('descriptionMaxLength')
         if raw_len is None:
-            self._desc_max_len = None
+            obj._desc_max_len = None
         else:
             try:
-                self._desc_max_len = int(raw_len)
+                obj._desc_max_len = int(raw_len)
             except (TypeError, ValueError):
                 logger.warning(
                     'OutputShapingPipeline: invalid descriptionMaxLength %r — disabling truncation.',
                     raw_len,
                 )
-                self._desc_max_len = None
+                obj._desc_max_len = None
         logger.info(
             'OutputShapingPipeline: outputMode=%r descriptionMaxLength=%r',
-            self._output_mode, self._desc_max_len,
+            obj._output_mode, obj._desc_max_len,
         )
+        return obj
 
-    def process_item(self, item, spider):
+    def open_spider(self) -> None:
+        pass
+
+    def process_item(self, item):
         d = item if isinstance(item, dict) else ItemAdapter(item).asdict()
         return shape_output(d, self._output_mode, self._desc_max_len)

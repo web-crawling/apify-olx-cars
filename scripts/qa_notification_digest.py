@@ -69,26 +69,22 @@ class FakeSettings(dict):
         return super().get(key, default)
 
 
-class FakeSpider:
-    """Minimal spider stub — pipeline only reads spider.settings."""
+class FakeCrawler:
+    """Minimal crawler stub with a settings attribute (for from_crawler)."""
     def __init__(self, input_data: dict):
         self.settings = FakeSettings(INPUT_DATA=input_data)
 
-    def log(self, msg, level=None):
-        pass
 
-
-def make_pipeline(input_data: dict) -> tuple[NotificationBufferPipeline, FakeSpider]:
-    """Create a fresh pipeline + spider pair and call open_spider."""
-    # Reset class attributes before each test to prevent bleed-over
+def make_pipeline(input_data: dict) -> NotificationBufferPipeline:
+    """Create a fresh pipeline via from_crawler."""
+    # Reset class attributes before each test to prevent bleed-over.
+    # from_crawler also resets them, but doing it here is defensive.
     NotificationBufferPipeline.new_items_buffer = []
     NotificationBufferPipeline.price_drop_buffer = []
     NotificationBufferPipeline._counts = {}
 
-    spider = FakeSpider(input_data)
-    pipeline = NotificationBufferPipeline()
-    pipeline.open_spider(spider)
-    return pipeline, spider
+    pipeline = NotificationBufferPipeline.from_crawler(FakeCrawler(input_data))
+    return pipeline
 
 
 def make_item(change_type: str, price: int | None = None,
@@ -117,14 +113,14 @@ def make_item(change_type: str, price: int | None = None,
 # ---------------------------------------------------------------------------
 section("Test 1: notifyOn='none' — buffers empty")
 
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "none",
     "incrementalMode": True,
 })
 
 for i in range(5):
     item = make_item("NEW", price=10000, offer_id=i + 1)
-    pipeline.process_item(item, spider)
+    pipeline.process_item(item)
 
 check(
     "T1a: new_items_buffer empty after 5 NEW items with notifyOn=none",
@@ -147,7 +143,7 @@ check(
 # ---------------------------------------------------------------------------
 section("Test 2: counts match changeType totals")
 
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "both",
     "notifyMinPriceDropPct": 5,
     "notifyTopN": 20,
@@ -156,15 +152,15 @@ pipeline, spider = make_pipeline({
 
 # Push: 3 NEW + 2 UPDATED + 5 UNCHANGED + 1 MISSING + 1 REAPPEARED = 12 total
 for i in range(3):
-    pipeline.process_item(make_item("NEW", price=10000, offer_id=100 + i), spider)
+    pipeline.process_item(make_item("NEW", price=10000, offer_id=100 + i))
 for i in range(2):
-    pipeline.process_item(make_item("UPDATED", price=9000, offer_id=200 + i), spider)
+    pipeline.process_item(make_item("UPDATED", price=9000, offer_id=200 + i))
 for i in range(5):
-    pipeline.process_item(make_item("UNCHANGED", price=8000, offer_id=300 + i), spider)
+    pipeline.process_item(make_item("UNCHANGED", price=8000, offer_id=300 + i))
 for i in range(1):
-    pipeline.process_item(make_item("MISSING", price=7000, offer_id=400 + i), spider)
+    pipeline.process_item(make_item("MISSING", price=7000, offer_id=400 + i))
 for i in range(1):
-    pipeline.process_item(make_item("REAPPEARED", price=6000, offer_id=500 + i), spider)
+    pipeline.process_item(make_item("REAPPEARED", price=6000, offer_id=500 + i))
 
 counts = NotificationBufferPipeline._counts
 expected_counts = {
@@ -188,7 +184,7 @@ section("Test 3: notifyTopN truncation")
 
 notify_top_n = 2
 
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "new_listings",
     "notifyTopN": notify_top_n,
     "notifyMinPriceDropPct": 5,
@@ -200,7 +196,6 @@ for i in range(10):
     ts = f"2026-05-18T10:{i:02d}:00+00:00"
     pipeline.process_item(
         make_item("NEW", price=10000, offer_id=1000 + i, first_seen_at=ts),
-        spider,
     )
 
 # Simulate the main.py post-crawl sort+slice
@@ -229,7 +224,7 @@ check(
 # ---------------------------------------------------------------------------
 section("Test 4: notifyMinPriceDropPct filter")
 
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "price_drops",
     "notifyMinPriceDropPct": 10,
     "notifyTopN": 20,
@@ -262,7 +257,7 @@ for i, (prev_p, curr_p) in enumerate(drop_scenarios):
             {"price": curr_p, "currency": "EUR", "seenAt": "2026-05-18T10:00:00+00:00"},
         ],
     )
-    pipeline.process_item(item, spider)
+    pipeline.process_item(item)
 
 qualified = NotificationBufferPipeline.price_drop_buffer
 check(
@@ -286,7 +281,7 @@ section("Test 5: cold-start — NEW items suppressed before reaching pipeline")
 # DOWNSTREAM contract: after a cold-start run, new_items_buffer is empty and
 # the digest builder must handle the empty-buffer case gracefully.
 
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "both",
     "notifyMinPriceDropPct": 5,
     "notifyTopN": 20,
@@ -297,7 +292,7 @@ pipeline, spider = make_pipeline({
 # by IncrementalDiffPipeline). We only push UNCHANGED (snapshot-seeded) items.
 for i in range(5):
     pipeline.process_item(
-        make_item("UNCHANGED", price=10000, offer_id=3000 + i), spider
+        make_item("UNCHANGED", price=10000, offer_id=3000 + i)
     )
 
 check(
@@ -350,7 +345,7 @@ check(
 section("Test 7: price-drop math correctness")
 
 # Spec: priceHistory=[{price:10000}, {price:8500}], curr=8500 → pct=15.0
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "price_drops",
     "notifyMinPriceDropPct": 5,
     "notifyTopN": 20,
@@ -366,7 +361,7 @@ item = make_item(
         {"price": 8500, "currency": "EUR", "seenAt": "2026-05-18T10:00:00+00:00"},
     ],
 )
-pipeline.process_item(item, spider)
+pipeline.process_item(item)
 
 drops = NotificationBufferPipeline.price_drop_buffer
 check(
@@ -397,7 +392,7 @@ if drops:
 # ---------------------------------------------------------------------------
 section("Test 8: non-qualifying price drops excluded")
 
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "price_drops",
     "notifyMinPriceDropPct": 5,
     "notifyTopN": 20,
@@ -414,7 +409,7 @@ item = make_item(
         {"price": 8400, "currency": "EUR", "seenAt": "2026-05-18T10:00:00+00:00"},
     ],
 )
-pipeline.process_item(item, spider)
+pipeline.process_item(item)
 
 check(
     "T8a: 1.18% drop does not qualify at notifyMinPriceDropPct=5",
@@ -507,7 +502,7 @@ check(
 section("Edge cases: price-drop buffer guards")
 
 # Edge case A: curr_price > prev_price (price INCREASE) — must NOT qualify
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "price_drops",
     "notifyMinPriceDropPct": 5,
     "notifyTopN": 20,
@@ -522,7 +517,7 @@ item = make_item(
         {"price": 12000, "currency": "EUR", "seenAt": "2026-05-18T10:00:00+00:00"},
     ],
 )
-pipeline.process_item(item, spider)
+pipeline.process_item(item)
 check(
     "EC-A: price INCREASE (10000→12000) not buffered as a price drop",
     NotificationBufferPipeline.price_drop_buffer == [],
@@ -530,7 +525,7 @@ check(
 )
 
 # Edge case B: only 1 priceHistory entry — must NOT attempt drop computation
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "price_drops",
     "notifyMinPriceDropPct": 5,
     "notifyTopN": 20,
@@ -544,7 +539,7 @@ item = make_item(
         {"price": 10000, "currency": "EUR", "seenAt": "2026-05-18T10:00:00+00:00"},
     ],
 )
-pipeline.process_item(item, spider)
+pipeline.process_item(item)
 check(
     "EC-B: single-entry priceHistory does not trigger price drop",
     NotificationBufferPipeline.price_drop_buffer == [],
@@ -552,14 +547,14 @@ check(
 )
 
 # Edge case C: UPDATED item with no priceHistory at all
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "price_drops",
     "notifyMinPriceDropPct": 5,
     "notifyTopN": 20,
     "incrementalMode": True,
 })
 item = make_item("UPDATED", price=8000, offer_id=9012, price_history=None)
-pipeline.process_item(item, spider)
+pipeline.process_item(item)
 check(
     "EC-C: None priceHistory does not crash or buffer",
     NotificationBufferPipeline.price_drop_buffer == [],
@@ -567,13 +562,13 @@ check(
 )
 
 # Edge case D: notifyOn='new_listings' — UPDATED items NOT counted in new_items_buffer
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "new_listings",
     "notifyMinPriceDropPct": 5,
     "notifyTopN": 20,
     "incrementalMode": True,
 })
-pipeline.process_item(make_item("UPDATED", price=9000, offer_id=9013), spider)
+pipeline.process_item(make_item("UPDATED", price=9000, offer_id=9013))
 check(
     "EC-D: notifyOn=new_listings — UPDATED item not in new_items_buffer",
     NotificationBufferPipeline.new_items_buffer == [],
@@ -586,13 +581,13 @@ check(
 )
 
 # Edge case E: notifyOn='price_drops' — NEW items not in new_items_buffer
-pipeline, spider = make_pipeline({
+pipeline = make_pipeline({
     "notifyOn": "price_drops",
     "notifyMinPriceDropPct": 5,
     "notifyTopN": 20,
     "incrementalMode": True,
 })
-pipeline.process_item(make_item("NEW", price=10000, offer_id=9014), spider)
+pipeline.process_item(make_item("NEW", price=10000, offer_id=9014))
 check(
     "EC-E: notifyOn=price_drops — NEW item not in new_items_buffer",
     NotificationBufferPipeline.new_items_buffer == [],
@@ -604,16 +599,13 @@ check(
     f"counts={NotificationBufferPipeline._counts!r}",
 )
 
-# Edge case F: open_spider reset — verify class attributes reset on second open_spider
-pipeline, spider = make_pipeline({"notifyOn": "both", "notifyMinPriceDropPct": 5, "notifyTopN": 20})
-pipeline.process_item(make_item("NEW", price=10000, offer_id=9020), spider)
-# Simulate second run: call open_spider again on same pipeline instance
-NotificationBufferPipeline.new_items_buffer = []
-NotificationBufferPipeline.price_drop_buffer = []
-NotificationBufferPipeline._counts = {}
-pipeline.open_spider(spider)
+# Edge case F: from_crawler reset — verify class attributes reset on second from_crawler
+pipeline = make_pipeline({"notifyOn": "both", "notifyMinPriceDropPct": 5, "notifyTopN": 20})
+pipeline.process_item(make_item("NEW", price=10000, offer_id=9020))
+# Simulate second run: create a new pipeline via from_crawler (resets class-attribute buffers)
+pipeline = make_pipeline({"notifyOn": "both", "notifyMinPriceDropPct": 5, "notifyTopN": 20})
 check(
-    "EC-F: open_spider resets class-attribute buffers for second run",
+    "EC-F: from_crawler resets class-attribute buffers for second run",
     NotificationBufferPipeline.new_items_buffer == []
     and NotificationBufferPipeline.price_drop_buffer == []
     and NotificationBufferPipeline._counts == {},

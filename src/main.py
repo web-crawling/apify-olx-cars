@@ -163,6 +163,17 @@ async def main() -> None:
             )
             notify_webhook_url = ''
 
+        # --- VIN enrichment KV store setup (#19) ---
+        enrich_vin = bool(actor_input.get('enrichVIN', False))
+        vin_cache = None
+        if enrich_vin:
+            # IMPORTANT: open a NAMED key-value store. Without `name=...`,
+            # Actor.open_key_value_store() returns the per-run default store,
+            # which is unique to each run — cache would never persist across
+            # runs (see MEMORY.md `project_apify_named_kv_store.md`).
+            vin_cache = await Actor.open_key_value_store(name='olx-cars-vin-cache')
+            Actor.log.info('VIN enrichment: KV cache "olx-cars-vin-cache" opened.')
+
         snapshot: dict = {}
         kv_store = None
         if incremental_mode:
@@ -218,6 +229,9 @@ async def main() -> None:
                 # --- Output shaping fields (#24) ---
                 'outputMode': actor_input.get('outputMode', 'full') or 'full',
                 'descriptionMaxLength': actor_input.get('descriptionMaxLength'),
+                # --- VIN enrichment fields (#19) ---
+                'enrichVIN': enrich_vin,
+                '_vinCache': vin_cache,  # opened named KV store, or None when enrichVIN=false
             },
             priority='spider',
         )
@@ -225,6 +239,8 @@ async def main() -> None:
         # --- Reset class-level flags before each run ---
         # (prevents false positives if Actor is somehow re-run in the same process)
         OlxCarsSpider.crawl_failed = False
+        OlxCarsSpider._vpic_success_count = 0
+        OlxCarsSpider._vpic_error_count = 0
         HistoryFilterPipeline.reset()
         IncrementalDiffPipeline.updated_snapshot = {}
         IncrementalDiffPipeline.seen_offer_ids = set()
@@ -491,6 +507,15 @@ async def main() -> None:
                         '(non-fatal, dataset is unaffected)',
                         notify_webhook_url, exc,
                     )
+
+        # --- Post-crawl: VIN enrichment summary (#19) ---
+        if enrich_vin:
+            Actor.log.info(
+                'VIN enrichment summary: %d succeeded, %d failed '
+                '(failed items emitted without vinDecoded — non-fatal).',
+                OlxCarsSpider._vpic_success_count,
+                OlxCarsSpider._vpic_error_count,
+            )
 
         # --- Check for fatal errors ---
         # CRITICAL: access OlxCarsSpider.crawl_failed as a CLASS attribute.

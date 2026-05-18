@@ -42,6 +42,10 @@ DOWNLOAD_SLOTS = {
     'www.olx.pt': {'concurrency': 8,  'delay': 0.10},
     'www.olx.ua': {'concurrency': 8,  'delay': 0.10},
     'www.olx.kz': {'concurrency': 8,  'delay': 0.10},
+    # vPIC (NHTSA) slot — limits VIN enrichment requests to ~5 rps,
+    # safely under NHTSA's "reasonable use" guideline of ~10 rps.
+    # Concurrency 5, delay 0.1 s. OLX slots are unaffected.
+    'vpic': {'concurrency': 5, 'delay': 0.1, 'randomize_delay': False},
 }
 
 # ---------------------------------------------------------------------------

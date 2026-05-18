@@ -10,7 +10,23 @@ Usage:
     # Polite mode (slower, useful if a domain throttles)
     python scripts/build_brand_categories.py --delay 0.5
 
-How it works
+    # Dump color ID maps for UA and KZ (separate subcommand)
+    python scripts/build_brand_categories.py --dump-color-ids
+    python scripts/build_brand_categories.py --dump-color-ids --countries ua
+    python scripts/build_brand_categories.py --dump-color-ids --delay 0.2
+
+    The --dump-color-ids mode harvests numeric color id -> localised label pairs
+    from listing params (not metadata filters — those require auth).  It samples
+    many listing pages across multiple sort orders, collects every ``color`` param
+    value encountered, and writes the result to:
+        src/data/_color_ids_ua.json
+        src/data/_color_ids_kz.json
+    It also prints a Python-literal snippet suitable for pasting into
+    src/data/param_maps.py.  Only UA and KZ are targeted (RO/PL/BG/PT return
+    text slugs, not numeric ids, so no map is needed for them).
+    The --dump-color-ids mode does NOT touch brand_categories.json.
+
+How it works (brand discovery)
 ------------
 For each country, the script:
 
@@ -302,13 +318,179 @@ def _write_json(output_path: str, data: dict[str, dict]) -> None:
     os.replace(tmp_path, output_path)
 
 
+# ---------------------------------------------------------------------------
+# Color ID discovery (--dump-color-ids subcommand)
+# Only UA and KZ return numeric color ids; other countries use text slugs.
+# ---------------------------------------------------------------------------
+
+COLOR_COUNTRIES = ('ua', 'kz')
+
+# Listing pages sampled per sort order for color discovery.
+# 20 pages × 50 items × 3 sort orders = up to 3,000 listing rows — enough to
+# cover all active color ids in practice (typically ~20-25 unique values).
+COLOR_SAMPLE_PAGES = 20
+COLOR_PAGE_LIMIT = 50
+
+
+def collect_color_ids(
+    country: str, delay: float,
+) -> dict[str, str]:
+    """Sample many listing pages and collect all unique color id -> label pairs.
+
+    The OLX category-params endpoint (/api/v1/categories/{id}/attributes/) requires
+    an auth token.  Instead, color ids are harvested directly from the ``color``
+    param in individual listing responses — the same unauthenticated endpoint used
+    by the spider.  Sampling across multiple sort orders covers the full range of
+    active color ids in practice.
+
+    Returns a dict mapping numeric string id -> localised OLX label (Ukrainian for
+    UA, Russian for KZ).
+    """
+    domain = DOMAIN[country]
+    parent = PARENT_CAT[country]
+    session = requests.Session()
+    color_map: dict[str, str] = {}  # id_str -> label
+
+    for sort in SORT_ORDERS:
+        for page_idx in range(COLOR_SAMPLE_PAGES):
+            offset = page_idx * COLOR_PAGE_LIMIT
+            url = (
+                f'https://{domain}/api/v1/offers/?category_id={parent}'
+                f'&limit={COLOR_PAGE_LIMIT}&offset={offset}&sort={sort}'
+            )
+            try:
+                resp = session.get(url, headers=_headers(country), timeout=15)
+            except Exception as exc:
+                logger.warning(
+                    '  color %s sort=%s offset=%d: %s', country, sort, offset, exc,
+                )
+                continue
+            if resp.status_code == 400:
+                break  # offset cap hit
+            if resp.status_code != 200:
+                logger.warning(
+                    '  color %s sort=%s offset=%d: HTTP %d',
+                    country, sort, offset, resp.status_code,
+                )
+                continue
+            try:
+                data = resp.json()
+            except ValueError:
+                continue
+            listings = data.get('data') or []
+            if not listings:
+                break  # no more results on this sort
+            for listing in listings:
+                for param in (listing.get('params') or []):
+                    if param.get('key') != 'color':
+                        continue
+                    value = param.get('value') or {}
+                    raw_key = value.get('key')
+                    label = (value.get('label') or '').strip()
+                    id_str = str(raw_key) if raw_key is not None else ''
+                    if id_str and label and id_str not in color_map:
+                        color_map[id_str] = label
+            if delay > 0:
+                time.sleep(delay)
+        logger.info(
+            '  color %s sort=%s: %d unique ids so far',
+            country, sort, len(color_map),
+        )
+
+    return color_map
+
+
+def _write_color_json(output_path: str, color_map: dict[str, str]) -> None:
+    """Write color id map to a JSON file incrementally (tmp + rename)."""
+    # Sort by numeric id for deterministic output
+    ordered: dict[str, str] = dict(
+        sorted(color_map.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 9999)
+    )
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    tmp_path = output_path + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as fh:
+        json.dump(ordered, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, output_path)
+
+
+def _print_python_snippet(country: str, color_map: dict[str, str]) -> None:
+    """Print a Python-literal snippet for pasting into param_maps.py.
+
+    Labels are printed as Unicode escape sequences so the snippet is safe on
+    Windows terminals with a narrow code-page (e.g. cp1252).
+    """
+    ordered = sorted(color_map.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 9999)
+    var = 'UA_COLOR_MAP' if country == 'ua' else 'KZ_COLOR_MAP'
+    lines = [f'\n# --- Python snippet for {var} ---', f'{var}: dict[str, str] = {{']
+    for id_str, label in ordered:
+        # Use ascii() to produce a safe representation of the Cyrillic label
+        lines.append(f'    {id_str!r}: ...,  # {ascii(label)[1:-1]}')
+    lines.append('}')
+    snippet = '\n'.join(lines)
+    try:
+        print(snippet)
+    except UnicodeEncodeError:
+        print(snippet.encode('ascii', 'replace').decode('ascii'))
+
+
+def main_dump_color_ids(args: argparse.Namespace) -> None:
+    """Subcommand: discover color id maps for UA and KZ."""
+    requested = [c.strip().lower() for c in args.countries.split(',') if c.strip()]
+    # Only UA and KZ are supported for color id discovery
+    scan = [c for c in requested if c in COLOR_COUNTRIES]
+    skipped = [c for c in requested if c not in COLOR_COUNTRIES]
+    if skipped:
+        logger.info(
+            'Skipping %s: color id maps only needed for ua/kz '
+            '(other countries use text slugs).',
+            skipped,
+        )
+    if not scan:
+        logger.error('No valid color-id countries to scan. Pass --countries ua,kz or similar.')
+        sys.exit(2)
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(script_dir)
+    data_dir = os.path.join(repo_root, 'src', 'data')
+
+    for country in scan:
+        logger.info(
+            'Discovering color ids for %s (delay=%.2fs)', DOMAIN[country], args.delay,
+        )
+        color_map = collect_color_ids(country, args.delay)
+        logger.info('  %s: %d color ids discovered', country, len(color_map))
+
+        # Write JSON output
+        out_path = os.path.join(data_dir, f'_color_ids_{country}.json')
+        _write_color_json(out_path, color_map)
+        logger.info('  Written %s', out_path)
+
+        # Print Python snippet
+        _print_python_snippet(country, color_map)
+
+    logger.info(
+        '\nNext step: map each localised label to an English slug in '
+        'src/data/param_maps.py (UA_COLOR_MAP / KZ_COLOR_MAP).'
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    parser.add_argument(
+        '--dump-color-ids',
+        action='store_true',
+        help=(
+            'Discover color numeric id maps for UA and KZ by sampling listing '
+            'params.  Writes src/data/_color_ids_ua.json and _color_ids_kz.json. '
+            'Does NOT touch brand_categories.json.'
+        ),
+    )
     parser.add_argument(
         '--countries',
         default=','.join(ALL_COUNTRIES),
         help='Comma-separated country codes to refresh (default: all). '
-             'Existing data for excluded countries is preserved.',
+             'Existing data for excluded countries is preserved. '
+             'For --dump-color-ids: only ua/kz are valid targets.',
     )
     parser.add_argument(
         '--delay', type=float, default=0.15,
@@ -317,13 +499,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         '--max-retries', type=int, default=3,
-        help='Max retries on HTTP 403 with exponential backoff (default: 3).',
+        help='Max retries on HTTP 403 with exponential backoff (default: 3). '
+             'Brand discovery only; ignored for --dump-color-ids.',
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    if args.dump_color_ids:
+        main_dump_color_ids(args)
+        return
+
     requested = [c.strip().lower() for c in args.countries.split(',') if c.strip()]
     unknown = [c for c in requested if c not in ALL_COUNTRIES]
     if unknown:

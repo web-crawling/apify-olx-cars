@@ -7,14 +7,8 @@ Sources:
   - PARAM_KEY_MAP keys verified by efficiency-researcher (02-efficiency.md)
     against live param key dumps for all six countries.
   - Normalisation dicts derived from 01-data-points.md and live samples.
-  - UA/KZ numeric id lookups from 01-data-points.md annotations.
-
-TODOs:
-  - UA color numeric ids: only a sample is mapped here; run
-    ``scripts/build_brand_categories.py`` with --dump-color-ids to get a
-    full UA/KZ color lookup table.  # TODO: confirm full UA/KZ color list
-  - BG transmission ids: keys observed as text slugs but confirm numeric
-    variants do not appear.  # TODO: confirm bg transmission key shape
+  - UA/KZ numeric id lookups from live listing samples (issue #9, PR #62).
+    Regenerate with: python scripts/build_brand_categories.py --dump-color-ids
 """
 
 from __future__ import annotations
@@ -383,45 +377,70 @@ CONDITION_SEVERITY: dict[str, int] = {
 
 # ---------------------------------------------------------------------------
 # Color maps for UA/KZ (numeric IDs returned instead of text slugs)
-# These are partial — run scripts/build_brand_categories.py with --dump-colors
-# to generate the full maps.  # TODO: confirm full UA/KZ color ids
+#
+# Numeric string id → canonical English slug.
+# IDs harvested from live listing params (issue #9, 2026-05-18).
+# Regenerate with: python scripts/build_brand_categories.py --dump-color-ids
+# Output JSON files: src/data/_color_ids_ua.json, _color_ids_kz.json
+#
+# Note: IDs 16 and 19 were absent from all sampling runs for both countries
+# (presumed unused/deprecated by OLX).  ID 20 appears only on UA
+# ("Матовий" = matte finish) — KZ does not expose it.
 # ---------------------------------------------------------------------------
 
 UA_COLOR_MAP: dict[str, str] = {
     # Numeric string id → English slug
-    # Source: 01-data-points.md + sampled UA offers
-    # TODO: extend with full list from a live UA dump
-    "1": "black",
-    "2": "white",
-    "3": "silver",
-    "4": "gray",
-    "5": "red",
-    "6": "blue",
-    "7": "green",
-    "8": "yellow",
-    "9": "orange",
-    "10": "brown",
-    "11": "beige",
-    "12": "gold",
-    "13": "purple",
-    "14": "bordeaux",
+    # Source: live UA listing params, 2026-05-18 (22 ids discovered)
+    # OLX UA label (Ukrainian) noted in comments
+    "1": "white",       # Білий
+    "2": "black",       # Чорний
+    "3": "blue",        # Синій
+    "4": "gray",        # Сірий
+    "5": "silver",      # Сріблястий
+    "6": "red",         # Червоний
+    "7": "green",       # Зелений
+    "8": "orange",      # Апельсин (lit. "orange fruit")
+    "9": "gray",        # Асфальт (dark charcoal/asphalt → gray family)
+    "10": "beige",      # Бежевий
+    "11": "other",      # Бірюзовий (turquoise — no canonical equivalent)
+    "12": "gold",       # Бронзовий (bronze → gold family)
+    "13": "bordeaux",   # Вишневий (cherry/burgundy)
+    "14": "blue",       # Блакитний (light blue → blue family)
+    "15": "yellow",     # Жовтий
+    "17": "gold",       # Золотий
+    "18": "brown",      # Коричневий
+    "20": "other",      # Матовий (matte finish — a surface treatment, not a hue)
+    "21": "green",      # Оливковий (olive green → green family)
+    "22": "other",      # Рожевий (pink — not in canonical vocabulary)
+    "24": "purple",     # Фіолетовий (violet)
+    "25": "other",      # Хамелеон (chameleon/colour-shifting paint)
 }
 
 KZ_COLOR_MAP: dict[str, str] = {
-    # Same numeric scheme as UA (shared taxonomy for post-Soviet domains)
-    # TODO: verify KZ color ids match UA
-    "1": "black",
-    "2": "white",
-    "3": "silver",
-    "4": "gray",
-    "5": "red",
-    "6": "blue",
-    "7": "green",
-    "8": "yellow",
-    "9": "orange",
-    "10": "brown",
-    "11": "beige",
-    "12": "gold",
-    "13": "purple",
-    "14": "bordeaux",
+    # Numeric string id → English slug
+    # Source: live KZ listing params, 2026-05-18 (21 ids discovered)
+    # OLX KZ label (Russian) noted in comments
+    # KZ ids largely overlap UA but are discovered standalone per
+    # the project rule against sharing taxonomy maps between countries.
+    "1": "white",       # Белый
+    "2": "black",       # Черный
+    "3": "blue",        # Синий
+    "4": "gray",        # Серый
+    "5": "silver",      # Серебристый
+    "6": "red",         # Красный
+    "7": "green",       # Зеленый
+    "8": "orange",      # Апельсин (lit. "orange fruit")
+    "9": "gray",        # Асфальт (dark charcoal/asphalt → gray family)
+    "10": "beige",      # Бежевый
+    "11": "other",      # Бирюзовый (turquoise — no canonical equivalent)
+    "12": "gold",       # Бронзовый (bronze → gold family)
+    "13": "bordeaux",   # Вишнёвый (cherry/burgundy)
+    "14": "blue",       # Голубой (light blue → blue family)
+    "15": "yellow",     # Желтый
+    "17": "gold",       # Золотой
+    "18": "brown",      # Коричневый
+    "22": "other",      # Розовый (pink — not in canonical vocabulary)
+    "23": "other",      # Сафари (safari/khaki — not in canonical vocabulary)
+    "24": "purple",     # Фиолетовый (violet)
+    "25": "other",      # Хамелеон (chameleon/colour-shifting paint)
 }

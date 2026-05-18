@@ -135,9 +135,10 @@ async def main() -> None:
                 'sellerType': actor_input.get('sellerType', 'any'),
                 'sortBy': sort_by,
                 'maxItems': max_items,
-                # --- History filter fields (#23) ---
+                # --- History filter fields (#23, #51) ---
                 'excludeDamaged': bool(actor_input.get('excludeDamaged', False)),
                 'firstOwnerOnly': bool(actor_input.get('firstOwnerOnly', False)),
+                'serviceBookOnly': bool(actor_input.get('serviceBookOnly', False)),
                 # --- Incremental mode fields ---
                 'incrementalMode': incremental_mode,
                 'stateKey': state_key,

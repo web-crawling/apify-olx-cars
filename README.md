@@ -70,6 +70,7 @@ The table below compares this actor against alternative options for scraping OLX
 | Output fields | 44 always-on + 5 incremental | — | — | — | — |
 | Incremental / change-tracking mode | Yes | — | — | — | — |
 | Price history per listing | Yes | — | — | — | — |
+| Multi-channel notifications / alerts | Slack, Discord, Make, n8n, Zapier (Telegram via relay) | — | — | — | Telegram |
 | No authentication required | Yes | — | — | — | — |
 
 > **Note:** Cells marked `—` could not be verified at time of writing. See each actor's store page for current details.
@@ -598,11 +599,11 @@ Adding `emitMissing: true` causes the actor to also emit items with `changeType:
 
 ## Notifications
 
-Notifications is an opt-in feature that builds a structured digest at the end of each run, summarising new listings and price drops detected since the previous run. The digest is written to a persistent Apify key-value store and, optionally, POSTed to a webhook URL of your choice.
+Notifications is an opt-in feature that builds a structured digest at the end of each run, summarising new listings and price drops detected since the previous run. The digest is written to a persistent Apify key-value store and, optionally, POSTed to a webhook URL of your choice. Use this to set up **car price alerts**, **new listing alerts for OLX**, or **price drop notifications** across Slack, Discord, Telegram (via relay), Make, n8n, Zapier, or any HTTP endpoint.
 
 ### Requirements
 
-- **`incrementalMode: true` is required.** Setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to exit immediately with the error message: `"notifyOn requires incrementalMode: true. Enable Incremental Mode or set notifyOn to 'none'."` This is a hard fail, not a silent no-op — the scrape does not start.
+- **`incrementalMode: true` is required.** See the [Incremental Monitoring](#incremental-monitoring) section above for how to enable it (set `incrementalMode: true` and pick a unique `stateKey` per monitoring job). Setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to exit immediately with the error message: `"notifyOn requires incrementalMode: true. Enable Incremental Mode or set notifyOn to 'none'."` This is a hard fail, not a silent no-op — the scrape does not start.
 - No proxy or authentication is required for the KV store path. The `notifyWebhookUrl` path requires you to supply your own webhook URL.
 
 ### Input parameters
@@ -670,7 +671,7 @@ The digest is a single JSON object. Below is an abbreviated example:
       "currency": "EUR"
     }
   ],
-  "summaryText": "OLX Cars run completed. 12 new listings, 5 price drops (≥5%). Top new: BMW X5 3.0d (€9,500) — see full digest in Apify KV store."
+  "summaryText": "OLX Cars run (ro, notifyOn=both): 12 new, 5 price drops (>=5%)."
 }
 ```
 
@@ -812,6 +813,8 @@ If you need a heuristic body-type classification for BG listings, read the `para
 **Direct `notifyWebhookUrl` POST to Telegram Bot API is not supported.** Telegram's `sendMessage` endpoint requires a bespoke `{"chat_id": ..., "text": ...}` body. Use Zapier, Make, or n8n to relay the digest, or author a small relay server. See the Notifications section for details.
 
 **Notification webhook POST failure does not fail the actor run.** If the outbound HTTP POST to `notifyWebhookUrl` fails, the actor logs a WARNING and the run completes with `SUCCEEDED` status. The digest is still written to the `olx-cars-notifications` KV store. Only the outbound POST is affected.
+
+**Notification KV write failure DOES fail the actor run.** If the actor cannot write the digest to the `olx-cars-notifications` KV store (e.g., transient storage outage), the run is marked `FAILED` via `Actor.fail()`. This asymmetry is intentional: a failed KV write would silently break the user's notification pipeline, while a failed webhook POST is recoverable since the digest is still queryable from KV.
 
 ## Frequently Asked Questions
 

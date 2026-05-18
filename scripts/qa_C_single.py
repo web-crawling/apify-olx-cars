@@ -53,6 +53,7 @@ settings.set(
         # FairPricePipeline included to match the production pipeline chain.
         # Items are buffered (DropItem raised) — FEEDS writer receives nothing.
         "src.pipelines.FairPricePipeline": 600,
+        "src.pipelines.OutputShapingPipeline": 700,
     },
     priority="spider",
 )

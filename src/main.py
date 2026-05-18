@@ -27,7 +27,7 @@ from scrapy.utils.defer import deferred_to_future
 
 import statistics
 
-from .pipelines import FairPricePipeline, HistoryFilterPipeline, IncrementalDiffPipeline, NotificationBufferPipeline, _drop_nones
+from .pipelines import FairPricePipeline, HistoryFilterPipeline, IncrementalDiffPipeline, NotificationBufferPipeline, _drop_nones, shape_output
 from .spiders.olx_cars import OlxCarsSpider
 
 
@@ -215,6 +215,9 @@ async def main() -> None:
                 'notifyMinPriceDropPct': notify_min_price_drop_pct,
                 'notifyTopN': notify_top_n,
                 'notifyWebhookUrl': notify_webhook_url,
+                # --- Output shaping fields (#24) ---
+                'outputMode': actor_input.get('outputMode', 'full') or 'full',
+                'descriptionMaxLength': actor_input.get('descriptionMaxLength'),
             },
             priority='spider',
         )
@@ -236,6 +239,17 @@ async def main() -> None:
         crawler_runner = CrawlerRunner(settings)
         crawl_deferred = crawler_runner.crawl(OlxCarsSpider)
         await deferred_to_future(crawl_deferred)
+
+        # --- Post-crawl: read output-shaping params once for both push blocks ---
+        _output_mode: str = str(actor_input.get('outputMode', 'full') or 'full')
+        if _output_mode not in ('full', 'compact'):
+            _output_mode = 'full'
+        _desc_max_len = actor_input.get('descriptionMaxLength')
+        if _desc_max_len is not None:
+            try:
+                _desc_max_len = int(_desc_max_len)
+            except (TypeError, ValueError):
+                _desc_max_len = None
 
         # --- Post-crawl: incremental state save + MISSING emission ---
         if incremental_mode and kv_store is not None:
@@ -259,7 +273,8 @@ async def main() -> None:
                     # MISSING items bypass Scrapy pipelines — strip Nones manually
                     # here, otherwise Apify schema-validates and rejects.
                     missing_item['isRepost'] = False
-                    await dataset.push_data(_drop_nones(missing_item))
+                    shaped = shape_output(_drop_nones(missing_item), _output_mode, _desc_max_len)
+                    await dataset.push_data(shaped)
                 Actor.log.info(
                     'Incremental mode: emitted %d MISSING items.', len(missing_items)
                 )
@@ -315,7 +330,7 @@ async def main() -> None:
                         # Numeric corruption; leave the fields absent
                         pass
                 try:
-                    await dataset.push_data(item)
+                    await dataset.push_data(shape_output(item, _output_mode, _desc_max_len))
                 except Exception as exc:
                     push_failed = True
                     Actor.log.error(

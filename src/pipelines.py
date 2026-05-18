@@ -30,6 +30,14 @@ Pipelines:
     with country-specific fields (e.g. district=None for PT/RO/BG/KZ)
     must be cleaned before push. See issue #33 for the failing run that
     motivated this pipeline.
+
+  OutputShapingPipeline — applies outputMode and descriptionMaxLength
+    transforms at priority 700. When outputMode='compact', retains only the
+    18-field COMPACT_FIELDS slice. When descriptionMaxLength is set, truncates
+    the description field to that many characters (0 drops it entirely). In
+    practice, FairPricePipeline at 600 drops all items before this fires;
+    the real work happens in main.py's post-crawl push blocks via shape_output().
+    See issue #24.
 """
 
 from __future__ import annotations
@@ -589,3 +597,95 @@ class NotificationBufferPipeline:
                         pass
 
         return item
+
+
+# ---------------------------------------------------------------------------
+# Output shaping (issue #24)
+# ---------------------------------------------------------------------------
+
+#: Approved 18-field compact slice (Gate 1, 2026-05-18).
+#: architect's 15 base fields + engineCapacityCm3, powerHp, color.
+COMPACT_FIELDS: frozenset = frozenset({
+    'offerId', 'url', 'country', 'title', 'price', 'currency',
+    'make', 'model', 'year', 'mileageKm', 'fuelType', 'transmission',
+    'bodyType', 'condition', 'description',
+    'engineCapacityCm3', 'powerHp', 'color',
+})
+
+
+def shape_output(item: dict, output_mode: str, desc_max_len: 'int | None') -> dict:
+    """Apply description truncation and compact-mode field filtering to an item dict.
+
+    This is the canonical implementation shared by OutputShapingPipeline.process_item
+    and the two post-crawl push blocks in main.py (FairPrice buffer and MISSING items).
+
+    Args:
+        item: plain dict (DropNonesPipeline has already run; no None values expected).
+        output_mode: 'full' (no-op filter) or 'compact' (retain COMPACT_FIELDS only).
+        desc_max_len: None = no truncation; 0 = drop the field; >0 = truncate to N chars.
+
+    Returns:
+        The mutated item dict (mutated in-place for efficiency; returned for chaining).
+    """
+    # Description truncation (applies in both modes)
+    if desc_max_len is not None:
+        if desc_max_len == 0:
+            item.pop('description', None)
+        else:
+            desc = item.get('description')
+            if desc is not None:
+                item['description'] = desc[:desc_max_len]
+
+    # Compact field filter
+    if output_mode == 'compact':
+        for k in [k for k in list(item.keys()) if k not in COMPACT_FIELDS]:
+            del item[k]
+
+    return item
+
+
+class OutputShapingPipeline:
+    """Apply outputMode and descriptionMaxLength transforms to every item.
+
+    Priority: 700 — after FairPricePipeline (600), before Apify push (1000).
+
+    Note: FairPricePipeline raises DropItem for every item at priority 600, so
+    in the current architecture no item reaches this pipeline through the normal
+    Scrapy chain. The real work is performed by calling shape_output() directly
+    in main.py's two post-crawl push blocks (FairPrice buffer and MISSING items).
+    This pipeline is registered for defensive completeness and to handle any
+    future pipeline reordering.
+
+    Reads INPUT_DATA['outputMode'] (default 'full') and
+    INPUT_DATA['descriptionMaxLength'] (default None) from the Scrapy settings.
+    """
+
+    def open_spider(self, spider) -> None:
+        input_data = spider.settings.get('INPUT_DATA') or {}
+        raw_mode = input_data.get('outputMode', 'full') or 'full'
+        self._output_mode: str = raw_mode if raw_mode in ('full', 'compact') else 'full'
+        if raw_mode not in ('full', 'compact'):
+            logger.warning(
+                'OutputShapingPipeline: invalid outputMode %r — defaulting to "full".',
+                raw_mode,
+            )
+        raw_len = input_data.get('descriptionMaxLength')
+        if raw_len is None:
+            self._desc_max_len = None
+        else:
+            try:
+                self._desc_max_len = int(raw_len)
+            except (TypeError, ValueError):
+                logger.warning(
+                    'OutputShapingPipeline: invalid descriptionMaxLength %r — disabling truncation.',
+                    raw_len,
+                )
+                self._desc_max_len = None
+        logger.info(
+            'OutputShapingPipeline: outputMode=%r descriptionMaxLength=%r',
+            self._output_mode, self._desc_max_len,
+        )
+
+    def process_item(self, item, spider):
+        d = item if isinstance(item, dict) else ItemAdapter(item).asdict()
+        return shape_output(d, self._output_mode, self._desc_max_len)

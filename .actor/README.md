@@ -38,6 +38,7 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **Data source:** OLX's public `/api/v1/offers/` JSON endpoint.
 - **Proxy required:** No.
 - **Output:** JSON -- 44 always-on top-level fields per listing (price, make, model, year, mileage, fuel, transmission, body type, condition raw slug, seller info, location, photo URLs) plus 5 incremental-mode-only fields when `incrementalMode: true`, plus `extraAttributes`, `priceVsMedianPct`, and `priceRating` when applicable. (`conditionRaw` is absent when the listing has no condition param, but is included when present.)
+- **Compact output mode:** Set `outputMode: "compact"` to emit an 18-field subset optimised for LLM/RAG pipelines. See the Output mode section below.
 - **Throughput:** 40-65 listings per API call; one country's full structured-filter run typically returns up to 1,000 listings before the OLX cap.
 - **Coverage past 1,000 results:** automatic brand-level and year-band slicing when `maxItems > 1000`.
 - **Authentication:** none required -- runs against public listing endpoints.
@@ -54,6 +55,7 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **History condition filters** -- `excludeDamaged` drops accident/damaged listings client-side; `firstOwnerOnly` keeps only first-owner listings; `serviceBookOnly` (BG-only) keeps only listings with a stamped service book. Each filter applies where OLX exposes the relevant flag (see the per-country support matrix in the Input Parameters section); unsupported countries are skipped silently.
 - **Within-run fair-price rating** -- `priceVsMedianPct` and `priceRating` computed from the listings in each run; useful when running broad queries where enough comparable listings form a bucket.
 - **Country-specific attributes pass-through** -- `extraAttributes` exposes all OLX `params[]` fields not already in top-level output, including door count, engine power, body sub-type, and other locale-specific values.
+- **Compact output mode** -- set `outputMode: "compact"` to emit only 18 core fields; reduces output size by ~60% for LLM/RAG pipelines where per-token cost matters. Use `descriptionMaxLength` to truncate or drop the description field in either mode.
 - **44 always-on top-level fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through. Four additional conditionally-present fields (`extraAttributes`, `priceVsMedianPct`, `priceRating`, `conditionRaw`) are included when applicable.
 - **No proxy required** -- direct datacenter access to OLX's public API.
 - **Incremental monitoring mode** -- opt-in change tracking across runs; emit only new, updated, or missing listings instead of the full dataset every time.
@@ -65,15 +67,16 @@ The table below compares this actor against alternative options for scraping OLX
 
 | Feature | olx-cars (this actor) | OLX product search | Mobile.de | Otomoto | AutoScout24 |
 |---|---|---|---|---|---|
-| Countries | 6 OLX domains (RO, PL, BG, PT, UA, KZ) | — | Germany only | Poland only | — |
-| Proxy required | No | — | — | — | — |
-| Output fields | 44 always-on + 5 incremental | — | — | — | — |
-| Incremental / change-tracking mode | Yes | — | — | — | — |
-| Price history per listing | Yes | — | — | — | — |
-| Multi-channel notifications / alerts | Slack, Discord, Make, n8n, Zapier (Telegram via relay) | — | — | — | Telegram |
-| No authentication required | Yes | — | — | — | — |
+| Countries | 6 OLX domains (RO, PL, BG, PT, UA, KZ) | -- | Germany only | Poland only | -- |
+| Proxy required | No | -- | -- | -- | -- |
+| Output fields | 44 always-on + 5 incremental | -- | -- | -- | -- |
+| Compact output mode | Yes (18-field subset) | -- | -- | -- | Yes |
+| Incremental / change-tracking mode | Yes | -- | -- | -- | -- |
+| Price history per listing | Yes | -- | -- | -- | -- |
+| Multi-channel notifications / alerts | Slack, Discord, Make, n8n, Zapier (Telegram via relay) | -- | -- | -- | Telegram |
+| No authentication required | Yes | -- | -- | -- | -- |
 
-> **Note:** Cells marked `—` could not be verified at time of writing. See each actor's store page for current details.
+> **Note:** Cells marked `--` could not be verified at time of writing. See each actor's store page for current details.
 
 ## Supported Countries
 
@@ -86,7 +89,7 @@ The table below compares this actor against alternative options for scraping OLX
 | Ukraine | olx.ua | USD, UAH | 51 |
 | Kazakhstan | olx.kz | KZT | 41 |
 
-**Brand map note:** The actor ships with a bundled `brand_categories.json` file that resolves brand names to per-country OLX category IDs across all six countries (316 brand-leaves total). Each country is discovered independently — OLX taxonomy diverges between domains beyond a small legacy range (for example, Dacia is category `742` on olx.ro but `1347` on olx.pl), so the maps are not shared. Maps are refreshed quarterly via a listing-discovery script; rare brand-leaves that rotate in or out of the listing sample are preserved across refreshes. If you supply a brand name that is not in the map for your selected country, the actor logs a warning listing the recognised brands and falls back to the parent cars category — brand filtering does not apply in that case, but the rest of the scrape proceeds normally.
+**Brand map note:** The actor ships with a bundled `brand_categories.json` file that resolves brand names to per-country OLX category IDs across all six countries (316 brand-leaves total). Each country is discovered independently -- OLX taxonomy diverges between domains beyond a small legacy range (for example, Dacia is category `742` on olx.ro but `1347` on olx.pl), so the maps are not shared. Maps are refreshed quarterly via a listing-discovery script; rare brand-leaves that rotate in or out of the listing sample are preserved across refreshes. If you supply a brand name that is not in the map for your selected country, the actor logs a warning listing the recognised brands and falls back to the parent cars category -- brand filtering does not apply in that case, but the rest of the scrape proceeds normally.
 
 ### Country notes
 
@@ -200,14 +203,16 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 | `serviceBookOnly` | boolean | NO | `false` | Keep only listings with a stamped service book. Applies on BG; ignored on RO/PL/PT/UA/KZ (no API signal). See the History filter support matrix below. |
 | `sortBy` | enum | NO | `"created_at:desc"` | `created_at:desc, filter_float_price:asc, filter_float_price:desc, relevance` |
 | `maxItems` | integer | NO | `1000` | Hard ceiling. OLX caps single queries at 1,000; `> 1000` triggers auto brand x year x price slicing |
+| `outputMode` | enum | NO | `"full"` | `"full"` returns all available fields (default). `"compact"` returns an 18-field subset optimised for LLM/RAG pipelines. See the Output mode section below. |
+| `descriptionMaxLength` | integer | NO | unset | Truncate the `description` field to this many characters. `0` drops the field entirely. Unset = no truncation. Applies in both `full` and `compact` modes. |
 | `incrementalMode` | boolean | NO | `false` | Enable change tracking across runs. See Incremental Monitoring section. |
 | `stateKey` | string | NO | `"olx-cars-state"` | KV store key for the snapshot. Use a unique key per monitoring job. |
 | `emitUnchanged` | boolean | NO | `false` | Also emit listings with no tracked-field changes (`changeType: UNCHANGED`). |
 | `emitMissing` | boolean | NO | `false` | Emit listings absent from current results (`changeType: MISSING`). Auto-suppressed when `maxItems` truncates the run. |
-| `notifyOn` | enum | NO | `"none"` | Controls which events trigger a digest at run end. `"none"` = disabled (no digest built). `"new_listings"` = digest of new listings only. `"price_drops"` = digest of price drops only. `"both"` = new listings and price drops. Requires `incrementalMode: true` — setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to fail immediately with a clear error message. See the Notifications section. |
-| `notifyMinPriceDropPct` | integer (1–99) | NO | `5` | Minimum price reduction percentage vs the prior snapshot price for a listing to qualify as a price-drop event in the digest. Only meaningful when `notifyOn` is `"price_drops"` or `"both"`. Values outside 1–99 are clamped with a WARNING. |
-| `notifyTopN` | integer (1–200) | NO | `20` | Maximum number of items in each section (`newItems`, `priceDrops`) of the digest payload. Items are ranked by most-recent `firstSeenAt` (new listings) or highest `priceDropPct` (price drops). Values outside 1–200 are clamped with a WARNING. |
-| `notifyWebhookUrl` | string | NO | `""` | Optional HTTPS URL to POST the digest JSON to at run end. Leave empty to disable outbound HTTP. When set, the actor performs a single `Content-Type: application/json` POST. Supports Slack incoming webhooks, Discord webhooks, and any generic HTTP endpoint. POST failure is non-fatal (WARNING only; scrape results are already saved). Keep this URL private — it is stored in run input history. |
+| `notifyOn` | enum | NO | `"none"` | Controls which events trigger a digest at run end. `"none"` = disabled (no digest built). `"new_listings"` = digest of new listings only. `"price_drops"` = digest of price drops only. `"both"` = new listings and price drops. Requires `incrementalMode: true` -- setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to fail immediately with a clear error message. See the Notifications section. |
+| `notifyMinPriceDropPct` | integer (1-99) | NO | `5` | Minimum price reduction percentage vs the prior snapshot price for a listing to qualify as a price-drop event in the digest. Only meaningful when `notifyOn` is `"price_drops"` or `"both"`. Values outside 1-99 are clamped with a WARNING. |
+| `notifyTopN` | integer (1-200) | NO | `20` | Maximum number of items in each section (`newItems`, `priceDrops`) of the digest payload. Items are ranked by most-recent `firstSeenAt` (new listings) or highest `priceDropPct` (price drops). Values outside 1-200 are clamped with a WARNING. |
+| `notifyWebhookUrl` | string | NO | `""` | Optional HTTPS URL to POST the digest JSON to at run end. Leave empty to disable outbound HTTP. When set, the actor performs a single `Content-Type: application/json` POST. Supports Slack incoming webhooks, Discord webhooks, and any generic HTTP endpoint. POST failure is non-fatal (WARNING only; scrape results are already saved). Keep this URL private -- it is stored in run input history. |
 
 **Input mode precedence:** `startUrls` wins when provided. All structured filters (`country`, `brands`, `query`, `yearFrom`, `yearTo`, `priceFrom`, `priceTo`, `priceCurrency`) are ignored when `startUrls` is set. Only `maxItems` and `sortBy` apply alongside `startUrls`. A warning is logged if structured filters are set alongside `startUrls`.
 
@@ -221,9 +226,47 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 | `firstOwnerOnly` | ❌ no signal | ❌ no signal | ✅ | ❌ no signal | ✅ | ✅ via `ownersCount` |
 | `serviceBookOnly` | ❌ no signal | ❌ no signal | ✅ | ❌ no signal | ❌ no signal | ❌ no signal |
 
-Cells marked ❌ or ⚠️ mean OLX does not expose the relevant flag on that country's API. When you set such a filter for an unsupported country, the actor logs an INFO line once per run and the filter is silently skipped — no listings are dropped and no error is raised. Runs proceed normally.
+Cells marked ❌ or ⚠️ mean OLX does not expose the relevant flag on that country's API. When you set such a filter for an unsupported country, the actor logs an INFO line once per run and the filter is silently skipped -- no listings are dropped and no error is raised. Runs proceed normally.
 
-**Intersection trap on BG:** Bulgarian listings carry exactly one `technical_condition` value per offer (e.g. `"service-book"`, `"first-owner"`, `"technically-upright"`, etc. — never multiple at once). Combining `serviceBookOnly: true` with `firstOwnerOnly: true` on BG therefore demands both slugs on the same listing, which almost no offer satisfies — the run will return near-zero items. If you want first-owner-OR-service-book coverage on BG, run the actor twice (once with each filter) and union the results.
+**Intersection trap on BG:** Bulgarian listings carry exactly one `technical_condition` value per offer (e.g. `"service-book"`, `"first-owner"`, `"technically-upright"`, etc. -- never multiple at once). Combining `serviceBookOnly: true` with `firstOwnerOnly: true` on BG therefore demands both slugs on the same listing, which almost no offer satisfies -- the run will return near-zero items. If you want first-owner-OR-service-book coverage on BG, run the actor twice (once with each filter) and union the results.
+
+## Output mode (compact / LLM-friendly)
+
+Set `outputMode: "compact"` to emit a reduced 18-field subset per listing instead of the full schema. The primary use case is LLM and RAG pipelines where per-token cost scales with output size -- compact mode cuts output volume by roughly 60%.
+
+### Compact fields
+
+`offerId`, `url`, `country`, `title`, `price`, `currency`, `make`, `model`, `year`, `mileageKm`, `fuelType`, `transmission`, `bodyType`, `condition`, `description`, `engineCapacityCm3`, `powerHp`, `color`
+
+These 18 fields cover core identification, pricing, and the vehicle attributes most relevant to car-search and pricing workflows. All other fields are dropped.
+
+### Explicitly excluded from compact
+
+The following field groups are not present in compact output:
+
+- **FairPrice fields** -- `priceVsMedianPct`, `priceRating`. These require run-wide bucket statistics and are absent by design even when they would otherwise be computed.
+- **Incremental tracking** -- `changeType`, `firstSeenAt`, `lastSeenAt`, `priceHistory`, `isRepost`.
+- **Nested objects** -- `seller`, `location`.
+- **Media and raw pass-through** -- `images`, `paramsRaw`, `extraAttributes`, `promotionFlags`, `conditionRaw`.
+- **Country-specific fields** -- `vin`, `licensePlate`, `drivetrain`, `steeringWheelSide`, `doorCount`, `seatCount`, `registrationStatus`, `countryOfOrigin`, `customsCleared`, `ownersCount`, `co2Emissions`, `features`.
+- **Timestamps** -- `postedAt`, `refreshedAt`, `validTo`, `scrapedAt`.
+- **Pricing extras** -- `priceNegotiable`, `pricePrevious`, `priceConverted`, `priceCurrencyConverted`.
+
+### `descriptionMaxLength`
+
+Controls the maximum character length of the `description` field. Applies in both `full` and `compact` modes regardless of `outputMode`.
+
+- **Positive integer** -- truncates the description to that many characters (byte-safe, character-boundary slice).
+- **`0`** -- drops the `description` field entirely from output.
+- **Unset (default)** -- no truncation; descriptions are emitted at full length.
+
+Example: `outputMode: "compact"` with `descriptionMaxLength: 300` returns the 18 compact fields with descriptions capped at 300 characters.
+
+### Compact mode with incremental monitoring
+
+When `outputMode: "compact"` is combined with `incrementalMode: true` and `emitMissing: true`, MISSING items emit only the fields that were stored in the snapshot at the time the listing was last seen. The snapshot stores a compact subset of fields for space efficiency; the fields available on MISSING items are typically: `offerId`, `title`, `price`, `currency`, `condition`, `mileageKm`, `firstSeenAt`, `lastSeenAt`, `priceHistory`, `changeType`. After compact filtering, only the intersection with the 18 compact fields remains: `offerId`, `title`, `price`, `currency`, `condition`, `mileageKm`. Fields such as `url`, `country`, `make`, and `model` are not stored in the snapshot and will be absent from compacted MISSING items.
+
+This is a known trade-off of the snapshot design -- if your pipeline requires `url` on MISSING items, use `outputMode: "full"`.
 
 ## Output Data
 
@@ -381,7 +424,7 @@ Every output item is a JSON object. Most fields are always present -- fields wit
 | `isRepost` | boolean | NO | `true` when `changeType` is `REAPPEARED` (the listing was absent in the prior run and has returned); `false` for all other change types. Only present when `incrementalMode: true`. |
 | `extraAttributes` | object | YES | Flat `{key: label}` dict of all OLX `params[]` entries for this listing. Covers country-specific attributes not surfaced as dedicated top-level fields. Keys are OLX param keys; values are the localised label strings as provided by OLX (Romanian on RO, Polish on PL, Bulgarian Cyrillic on BG, etc.). Some keys duplicate top-level fields (e.g. `fuel_type` appears here as a localised label alongside the normalised `fuelType` enum). Absent when `params[]` is empty. |
 | `priceVsMedianPct` | number | YES | Percentage deviation of this listing's price from the within-run bucket median. Bucket key: same `make`, `model`, 5-year year-band, 50,000 km mileage-band, and currency. Requires at least 5 listings in the bucket; absent otherwise, or when price is undisclosed, or for `MISSING` incremental items (stale prices excluded). This is a within-run comparison, not a historical market median. Typical single-country single-brand runs rate ~40 % of items; very narrow runs or rare brands may still yield few rated items. |
-| `priceRating` | string | YES | Qualitative price rating derived from `priceVsMedianPct`. Values: `very_good` (≤ −15 %), `good` (−15 % to −5 %), `fair` (±5 %), `high` (5 % to 15 %), `very_high` (≥ 15 %). Absent when `priceVsMedianPct` is absent. |
+| `priceRating` | string | YES | Qualitative price rating derived from `priceVsMedianPct`. Values: `very_good` (≤ -15 %), `good` (-15 % to -5 %), `fair` (±5 %), `high` (5 % to 15 %), `very_high` (≥ 15 %). Absent when `priceVsMedianPct` is absent. |
 
 ## Use Cases
 
@@ -407,7 +450,7 @@ Analyse how listing attributes correlate with time-on-market or perceived listin
 
 ### Feeding LLM and ML Pipelines with Structured Vehicle Data
 
-Use the JSON dataset directly as a training or RAG source for automotive chatbots and pricing models. Every output item is a flat JSON object with well-typed fields (no nested HTML strings; description is plain text with HTML stripped). The actor's dataset can be exported as JSON, CSV, Excel, or pulled via the Apify API for incremental ingestion.
+Use the JSON dataset directly as a training or RAG source for automotive chatbots and pricing models. Every output item is a flat JSON object with well-typed fields (no nested HTML strings; description is plain text with HTML stripped). Set `outputMode: "compact"` and `descriptionMaxLength: 300` to cut output size by ~60% before ingestion -- useful when token cost or context-window size is a constraint. The actor's dataset can be exported as JSON, CSV, Excel, or pulled via the Apify API for incremental ingestion.
 
 ## Pricing
 
@@ -603,7 +646,7 @@ Notifications is an opt-in feature that builds a structured digest at the end of
 
 ### Requirements
 
-- **`incrementalMode: true` is required.** See the [Incremental Monitoring](#incremental-monitoring) section above for how to enable it (set `incrementalMode: true` and pick a unique `stateKey` per monitoring job). Setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to exit immediately with the error message: `"notifyOn requires incrementalMode: true. Enable Incremental Mode or set notifyOn to 'none'."` This is a hard fail, not a silent no-op — the scrape does not start.
+- **`incrementalMode: true` is required.** See the [Incremental Monitoring](#incremental-monitoring) section above for how to enable it (set `incrementalMode: true` and pick a unique `stateKey` per monitoring job). Setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to exit immediately with the error message: `"notifyOn requires incrementalMode: true. Enable Incremental Mode or set notifyOn to 'none'."` This is a hard fail, not a silent no-op -- the scrape does not start.
 - No proxy or authentication is required for the KV store path. The `notifyWebhookUrl` path requires you to supply your own webhook URL.
 
 ### Input parameters
@@ -611,8 +654,8 @@ Notifications is an opt-in feature that builds a structured digest at the end of
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `notifyOn` | `"none"` | Which events trigger a digest. One of: `none` (disabled), `new_listings`, `price_drops`, `both`. |
-| `notifyMinPriceDropPct` | `5` | Minimum % price drop vs the prior snapshot for a listing to appear in the `priceDrops` digest array. Integer 1–99; values outside range are clamped. |
-| `notifyTopN` | `20` | Maximum items in each digest section (`newItems` and `priceDrops`). Integer 1–200; values outside range are clamped. |
+| `notifyMinPriceDropPct` | `5` | Minimum % price drop vs the prior snapshot for a listing to appear in the `priceDrops` digest array. Integer 1-99; values outside range are clamped. |
+| `notifyTopN` | `20` | Maximum items in each digest section (`newItems` and `priceDrops`). Integer 1-200; values outside range are clamped. |
 | `notifyWebhookUrl` | `""` | Optional HTTPS URL to POST the digest JSON to at run end. Empty = no outbound HTTP. |
 
 ### Digest payload
@@ -676,21 +719,21 @@ The digest is a single JSON object. Below is an abbreviated example:
 ```
 
 **Key fields:**
-- `counts` — totals by `changeType`. **Note:** counts reflect items that reach the notification pipeline AFTER the incremental diff stage. UNCHANGED items are dropped before reaching the pipeline unless `emitUnchanged: true` is set, so `counts.unchanged` and `counts.total` will be 0 on warm runs with no `emitUnchanged`. NEW, UPDATED, and REAPPEARED counts are always accurate. MISSING is counted when `emitMissing: true`.
-- `counts.priceDropsQualified` — total UPDATED items that passed the `notifyMinPriceDropPct` threshold, regardless of `notifyTopN` truncation.
-- `newItems` — up to `notifyTopN` items sorted by most-recent `firstSeenAt`. Each entry carries: `offerId, url, title, price, currency, year, mileageKm, make, model, firstSeenAt`.
-- `priceDrops` — up to `notifyTopN` items sorted by highest `priceDropPct`. Each entry carries: `offerId, url, title, priceCurrent, pricePrevious, priceDropPct, currency`. Items with an undisclosed price are excluded.
-- `summaryText` — pre-formatted human-readable one-liner, max 280 characters (Telegram-compatible length). Suitable as a direct Slack or Discord message body without custom templating.
-- `startUrlsCount` — scalar count of `startUrls` entries when that input mode was used. The full `startUrls` array is not included (could be very large).
+- `counts` -- totals by `changeType`. **Note:** counts reflect items that reach the notification pipeline AFTER the incremental diff stage. UNCHANGED items are dropped before reaching the pipeline unless `emitUnchanged: true` is set, so `counts.unchanged` and `counts.total` will be 0 on warm runs with no `emitUnchanged`. NEW, UPDATED, and REAPPEARED counts are always accurate. MISSING is counted when `emitMissing: true`.
+- `counts.priceDropsQualified` -- total UPDATED items that passed the `notifyMinPriceDropPct` threshold, regardless of `notifyTopN` truncation.
+- `newItems` -- up to `notifyTopN` items sorted by most-recent `firstSeenAt`. Each entry carries: `offerId, url, title, price, currency, year, mileageKm, make, model, firstSeenAt`.
+- `priceDrops` -- up to `notifyTopN` items sorted by highest `priceDropPct`. Each entry carries: `offerId, url, title, priceCurrent, pricePrevious, priceDropPct, currency`. Items with an undisclosed price are excluded.
+- `summaryText` -- pre-formatted human-readable one-liner, max 280 characters (Telegram-compatible length). Suitable as a direct Slack or Discord message body without custom templating.
+- `startUrlsCount` -- scalar count of `startUrls` entries when that input mode was used. The full `startUrls` array is not included (could be very large).
 
 ### Where the digest is stored
 
 Every run with `notifyOn != "none"` writes the digest to the **`olx-cars-notifications`** Apify key-value store (a named store, separate from the incremental-state store). Two keys are written:
 
-- **`digest-latest`** — overwritten every run. Fetch this when you always want the most recent digest.
-- **`digest-<runId>`** — immutable per-run archive. Fetch by `runId` (available in Apify webhook payloads) to retrieve a specific run's digest.
+- **`digest-latest`** -- overwritten every run. Fetch this when you always want the most recent digest.
+- **`digest-<runId>`** -- immutable per-run archive. Fetch by `runId` (available in Apify webhook payloads) to retrieve a specific run's digest.
 
-The digest is **not** written to the actor's dataset — it is structurally incompatible with car-listing items and would break dataset exports.
+The digest is **not** written to the actor's dataset -- it is structurally incompatible with car-listing items and would break dataset exports.
 
 To find `STORE_ID` for the `olx-cars-notifications` store: Apify console → Storage → Key-value stores → `olx-cars-notifications` → copy the store ID from the URL.
 
@@ -707,7 +750,7 @@ This is a positive heartbeat. If you have a Slack or Discord integration, you wi
 
 The actor offers two delivery paths. They are independent and can be used simultaneously.
 
-#### Path A — Apify-native webhook + KV store (recommended, no credentials in actor input)
+#### Path A -- Apify-native webhook + KV store (recommended, no credentials in actor input)
 
 This path keeps your webhook credentials out of the actor's run input entirely. You configure the integration once in the Apify console.
 
@@ -719,7 +762,7 @@ This path keeps your webhook credentials out of the actor's run input entirely. 
    - Replace `{API_TOKEN}` with your Apify API token.
 5. Forward the fetched JSON to your channel using the integration's built-in HTTP action, or pipe it to Zapier/Make for further routing.
 
-#### Path B — Direct webhook POST via `notifyWebhookUrl`
+#### Path B -- Direct webhook POST via `notifyWebhookUrl`
 
 Set `notifyWebhookUrl` in your actor input to have the actor POST the digest JSON directly at run end.
 
@@ -736,7 +779,7 @@ Set `notifyWebhookUrl` in your actor input to have the actor POST the digest JSO
 }
 ```
 
-The actor POSTs the raw digest JSON. Slack's incoming webhook endpoint (`https://hooks.slack.com/services/...`) accepts arbitrary JSON but renders only the `text` key as a formatted message. The `summaryText` field maps directly to what Slack would display if the body were `{"text": "..."}`, but the actor sends the full digest object — Slack will silently ignore all fields except `text` (which is absent in our payload) and show nothing. **For a properly formatted Slack message, use the Apify-native webhook path (Path A) and use Make or Zapier to shape the `summaryText` field into `{"text": "..."}` before forwarding to Slack.**
+The actor POSTs the raw digest JSON. Slack's incoming webhook endpoint (`https://hooks.slack.com/services/...`) accepts arbitrary JSON but renders only the `text` key as a formatted message. The `summaryText` field maps directly to what Slack would display if the body were `{"text": "..."}`, but the actor sends the full digest object -- Slack will silently ignore all fields except `text` (which is absent in our payload) and show nothing. **For a properly formatted Slack message, use the Apify-native webhook path (Path A) and use Make or Zapier to shape the `summaryText` field into `{"text": "..."}` before forwarding to Slack.**
 
 ##### Discord webhook (direct POST)
 
@@ -768,7 +811,7 @@ Recommended approach for Telegram:
 }
 ```
 
-Make, n8n, and Zapier all handle arbitrary JSON bodies natively. This is the easiest path for custom routing — the full digest object is available in the workflow for you to parse, filter, and forward as needed.
+Make, n8n, and Zapier all handle arbitrary JSON bodies natively. This is the easiest path for custom routing -- the full digest object is available in the workflow for you to parse, filter, and forward as needed.
 
 ## Limitations and Known Issues
 
@@ -780,7 +823,7 @@ Make, n8n, and Zapier all handle arbitrary JSON bodies natively. This is the eas
 
 **PT standvirtual cross-listings are skipped.** Some olx.pt listings link out to standvirtual.com (a sister site in the same OLX group). These offers are silently skipped and a count is logged at run end (e.g. "Skipped 3 offers on olx.pt that link to standvirtual.com"). Genuine olx.pt-native listings are unaffected.
 
-**Unmapped brand names fall back to the parent category.** Every country ships with a brand map (41–74 brands per country), but the OLX brand taxonomy is long-tailed — rare model lines, kit cars, and short-lived marques may not be in the bundled map. When a brand name is not found, the actor logs a warning with the list of recognised brands for that country and falls back to scraping the parent cars category. Brand filtering does not apply for the fallback path, but the rest of the scrape proceeds normally. Brand maps are refreshed quarterly.
+**Unmapped brand names fall back to the parent category.** Every country ships with a brand map (41-74 brands per country), but the OLX brand taxonomy is long-tailed -- rare model lines, kit cars, and short-lived marques may not be in the bundled map. When a brand name is not found, the actor logs a warning with the list of recognised brands for that country and falls back to scraping the parent cars category. Brand filtering does not apply for the fallback path, but the rest of the scrape proceeds normally. Brand maps are refreshed quarterly.
 
 **KZ engine size data quality.** Kazakhstan sellers are inconsistent about whether they enter engine displacement in litres or cm3 in the OLX platform. The actor returns the value as provided by OLX without conversion.
 
@@ -797,9 +840,9 @@ If you need a heuristic body-type classification for BG listings, read the `para
 
 **`make` field is null in startUrls / parent-category mode.** The `make` field is populated from OLX's category metadata (`cat_l2_name`), which is only present in brand-leaf category responses. When using `startUrls` pointing to a parent category URL (not a brand-specific sub-category), or when a brand is not found in the brand map, `make` will be null. `model` and other fields extracted from per-listing `params` are unaffected.
 
-**Fair-price rating coverage depends on listing density.** The `priceVsMedianPct` and `priceRating` fields are computed within each run by bucketing listings on make, model, 5-year year-band, 50,000 km mileage-band, and currency. A bucket must contain at least 5 listings before any item in it receives a rating. In typical single-country single-brand runs, ~40 % of items receive a rating; broader runs (parent cars category, multi-brand) push this higher. Niche models, rare brands on small markets, or runs with fewer than ~20–30 total items may still return few or no rated items. The rating reflects current within-run prices only, not a historical OLX market median.
+**Fair-price rating coverage depends on listing density.** The `priceVsMedianPct` and `priceRating` fields are computed within each run by bucketing listings on make, model, 5-year year-band, 50,000 km mileage-band, and currency. A bucket must contain at least 5 listings before any item in it receives a rating. In typical single-country single-brand runs, ~40 % of items receive a rating; broader runs (parent cars category, multi-brand) push this higher. Niche models, rare brands on small markets, or runs with fewer than ~20-30 total items may still return few or no rated items. The rating reflects current within-run prices only, not a historical OLX market median.
 
-**History filters drop items client-side and may produce fewer than `maxItems` items.** The `excludeDamaged`, `firstOwnerOnly`, and `serviceBookOnly` filters work by inspecting each listing's raw condition slug after fetching from OLX (no API-level filter is available). Listings are dropped at pipeline priority 150, which fires AFTER the `maxItems` cap at priority 100. As a result, a run with `maxItems: 100` plus any of these filters may yield fewer than 100 output items if some fetched listings were filtered out. To compensate, increase `maxItems` by ~10–30% over your target sample size when using these filters. For example: set `maxItems: 130` to typically land near 100 output items when around 20–25% of listings in your query are damaged.
+**History filters drop items client-side and may produce fewer than `maxItems` items.** The `excludeDamaged`, `firstOwnerOnly`, and `serviceBookOnly` filters work by inspecting each listing's raw condition slug after fetching from OLX (no API-level filter is available). Listings are dropped at pipeline priority 150, which fires AFTER the `maxItems` cap at priority 100. As a result, a run with `maxItems: 100` plus any of these filters may yield fewer than 100 output items if some fetched listings were filtered out. To compensate, increase `maxItems` by ~10-30% over your target sample size when using these filters. For example: set `maxItems: 130` to typically land near 100 output items when around 20-25% of listings in your query are damaged.
 
 **`MISSING` incremental items do not receive fair-price fields.** When `emitMissing: true`, items emitted with `changeType: MISSING` come from the prior-run snapshot and may have stale prices. `priceVsMedianPct` and `priceRating` are intentionally absent for MISSING items to avoid comparing stale snapshot prices against the current run's median.
 
@@ -807,7 +850,7 @@ If you need a heuristic body-type classification for BG listings, read the `para
 
 **GPS coordinates may be obfuscated.** Some sellers hide their exact location. When `location.gpsObfuscated` is `true`, the `latitude` and `longitude` coordinates represent a neighbourhood centroid rather than the exact address.
 
-**Notifications require `incrementalMode: true`.** Setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to fail with a clear error message before the scrape starts. This is by design — new-listing and price-drop signals are undefined without a prior-run snapshot to compare against.
+**Notifications require `incrementalMode: true`.** Setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to fail with a clear error message before the scrape starts. This is by design -- new-listing and price-drop signals are undefined without a prior-run snapshot to compare against.
 
 **Direct `notifyWebhookUrl` POST to Slack or Discord does not render natively.** The actor POSTs the raw digest JSON. Slack and Discord expect `{"text": "..."}` and `{"content": "..."}` shaped bodies respectively for rendered messages. Use the Apify-native webhook path (Path A in the Notifications section) with Make or Zapier to shape the payload before forwarding.
 
@@ -816,6 +859,8 @@ If you need a heuristic body-type classification for BG listings, read the `para
 **Notification webhook POST failure does not fail the actor run.** If the outbound HTTP POST to `notifyWebhookUrl` fails, the actor logs a WARNING and the run completes with `SUCCEEDED` status. The digest is still written to the `olx-cars-notifications` KV store. Only the outbound POST is affected.
 
 **Notification KV write failure DOES fail the actor run.** If the actor cannot write the digest to the `olx-cars-notifications` KV store (e.g., transient storage outage), the run is marked `FAILED` via `Actor.fail()`. This asymmetry is intentional: a failed KV write would silently break the user's notification pipeline, while a failed webhook POST is recoverable since the digest is still queryable from KV.
+
+**Compact mode (`outputMode: "compact"`) excludes FairPrice, nested objects, media, and incremental fields.** If your workflow uses `priceVsMedianPct`, `priceRating`, `seller`, `location`, `images`, or incremental tracking fields, use `outputMode: "full"` (the default). See the Output mode section for the full field list.
 
 ## Frequently Asked Questions
 
@@ -846,6 +891,9 @@ Yes. Set `brands` to an array of brand names (e.g. `["BMW", "Toyota"]`), `yearFr
 **How do I scrape a pre-filtered OLX search URL?**
 Go to the OLX website for your country, apply the filters you want (brand, year, price, etc.) using the site's own interface, then copy the resulting search URL. Paste it as a `{ "url": "..." }` object in the `startUrls` array. The actor will paginate through all results from that pre-filtered URL up to `maxItems`. The country is auto-detected from the hostname -- no additional configuration needed.
 
+**How do I reduce token cost when feeding output to an LLM?**
+Set `outputMode: "compact"` to emit only the 18 core fields (`offerId`, `url`, `country`, `title`, `price`, `currency`, `make`, `model`, `year`, `mileageKm`, `fuelType`, `transmission`, `bodyType`, `condition`, `description`, `engineCapacityCm3`, `powerHp`, `color`). This cuts output size by roughly 60% compared to the full schema. You can also set `descriptionMaxLength` (e.g. `300`) to cap long listing descriptions, which are often the largest field by character count. Note: compact mode excludes `priceVsMedianPct`, `priceRating`, `seller`, `location`, and all incremental tracking fields. If you need any of those, use `outputMode: "full"`.
+
 **What output formats are supported?**
 The actor outputs structured JSON to Apify's dataset. From the Apify console or via the API, you can export as JSON, CSV, Excel (XLSX), or XML. The dataset also integrates with Google Sheets via the Apify Google Sheets integration and any HTTP-based integration via the Apify API.
 
@@ -871,7 +919,7 @@ OLX exposes a first-owner flag on three of the six supported countries (BG, UA, 
 OLX exposes a `service-book` condition flag exclusively on olx.bg (in the `technical_condition` field). The other five supported countries (RO, PL, PT, UA, KZ) do not surface a service-book attribute in their OLX `params[]` response. When you set `serviceBookOnly: true` for an unsupported country, the actor logs an INFO message once per run and proceeds without filtering -- no listings are dropped and the run succeeds normally.
 
 **Why are `priceVsMedianPct` and `priceRating` absent from my output?**
-These fields require at least 5 listings in the same bucket (same make, model, 5-year year-band, 50,000 km mileage-band, and currency) within a single run. As of v0.6.0, typical single-country single-brand runs (e.g. BMW in Romania or Poland) rate roughly 40 % of items; broader runs (omit the `brands` filter or include multiple brands) push this higher. Very narrow queries -- a single niche model, a rare brand on a small market, or runs with fewer than ~20–30 total items -- may still return few or no rated items. The fields are also absent for `MISSING` incremental items and for listings where price is undisclosed.
+These fields require at least 5 listings in the same bucket (same make, model, 5-year year-band, 50,000 km mileage-band, and currency) within a single run. As of v0.6.0, typical single-country single-brand runs (e.g. BMW in Romania or Poland) rate roughly 40 % of items; broader runs (omit the `brands` filter or include multiple brands) push this higher. Very narrow queries -- a single niche model, a rare brand on a small market, or runs with fewer than ~20-30 total items -- may still return few or no rated items. The fields are also absent for `MISSING` incremental items and for listings where price is undisclosed. Additionally, these fields are always absent when `outputMode: "compact"` is set -- they are excluded from the compact field set by design.
 
 **Why does my first run with incremental mode show 0 items?**
 This is expected. The first run with `incrementalMode: true` builds the baseline snapshot and emits nothing to the dataset. Run the actor a second time with the same `stateKey` and it will emit only listings that are new or changed since the first run. See the Incremental Monitoring section for details.

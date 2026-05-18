@@ -126,6 +126,24 @@
 			"minimum": 1,
 			"prefill": 1000
 		},
+		"outputMode": {
+			"title": "Output Mode",
+			"type": "string",
+			"editor": "select",
+			"enum": ["full", "compact"],
+			"enumTitles": ["Full (all fields)", "Compact (LLM/RAG optimised)"],
+			"default": "full",
+			"description": "Controls which output fields are emitted. 'Full' returns all available fields (default). 'Compact' returns a reduced 18-field set (offerId, url, country, title, price, currency, make, model, year, mileageKm, fuelType, transmission, bodyType, condition, description, engineCapacityCm3, powerHp, color) — optimised for LLM/RAG pipelines where token cost matters. descriptionMaxLength applies in both modes.",
+			"prefill": "full"
+		},
+		"descriptionMaxLength": {
+			"title": "Description Max Length",
+			"type": "integer",
+			"editor": "number",
+			"description": "Maximum character length for the description field. When set, long listing descriptions are truncated to this length (truncation is character-boundary safe). Set to 0 to drop the description field entirely. Leave unset for no truncation (default). Applies in both full and compact output modes.",
+			"minimum": 0,
+			"prefill": 500
+		},
 		"incrementalMode": {
 			"title": "Incremental Mode",
 			"type": "boolean",

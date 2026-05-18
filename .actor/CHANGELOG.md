@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.0.0 -- 2026-05-18
+
+### Added
+- **Compact output mode** -- set `outputMode: "compact"` to emit only 18 core fields
+  (`offerId`, `url`, `country`, `title`, `price`, `currency`, `make`, `model`, `year`,
+  `mileageKm`, `fuelType`, `transmission`, `bodyType`, `condition`, `description`,
+  `engineCapacityCm3`, `powerHp`, `color`) instead of the full schema. Reduces output
+  size by roughly 60%, which cuts token cost and context-window usage for LLM/RAG
+  pipelines.
+- **`descriptionMaxLength` input** -- truncate or drop the `description` field on any
+  run. Set to a positive integer to cap descriptions at that many characters; set to `0`
+  to drop the field entirely; leave unset for no truncation. Applies in both `full` and
+  `compact` output modes.
+
+### Notes
+- `priceVsMedianPct` and `priceRating` are excluded from compact output by design --
+  they require run-wide bucket statistics and are not meaningful in a reduced-field context.
+- Incremental tracking fields (`changeType`, `firstSeenAt`, `lastSeenAt`, `priceHistory`,
+  `isRepost`) and nested objects (`seller`, `location`) are also excluded from compact.
+- Closes [#24](https://github.com/web-crawling/apify-olx-cars/issues/24).
+
 ## v0.9.0 — 2026-05-18
 
 ### Added

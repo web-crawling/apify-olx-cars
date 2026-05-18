@@ -132,6 +132,7 @@ def run_scenario(scenario: dict, out_file: str) -> dict:
         "src.pipelines.NotificationBufferPipeline": 250,
         "src.pipelines.DropNonesPipeline": 500,
         "src.pipelines.FairPricePipeline": 600,
+        "src.pipelines.OutputShapingPipeline": 700,
     }, priority="spider")
 
     # Reset class-level flags

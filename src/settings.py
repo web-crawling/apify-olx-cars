@@ -100,6 +100,12 @@ ITEM_PIPELINES = {
     # and stores the buffer in class attributes for main.py to read after
     # the crawl, compute per-bucket medians, and push enriched items directly.
     'src.pipelines.FairPricePipeline': 600,
+    # OutputShapingPipeline applies outputMode (compact 18-field filter) and
+    # descriptionMaxLength truncation. Priority 700: after FairPricePipeline (600),
+    # before Apify push (1000). In practice FairPricePipeline drops all items before
+    # this fires — the real work happens in main.py's post-crawl push blocks via
+    # shape_output(). Registered here for defensive completeness (issue #24).
+    'src.pipelines.OutputShapingPipeline': 700,
 }
 
 # ---------------------------------------------------------------------------

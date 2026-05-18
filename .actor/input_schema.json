@@ -237,16 +237,16 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 50,
-			"description": "Width of each year band (in years) when auto-slicing by year for brand/query result sets that exceed 1000 visible listings. Smaller values (e.g. 2) give narrower bands and better coverage for densely-listed years. Larger values (e.g. 10) give fewer API calls. Default 5 covers the 1900–2100 range in 40 bands. Only relevant when maxItems > 1000."
+			"description": "Width of each year band (in years) when auto-slicing by year for brand/query result sets that exceed 1000 visible listings. Smaller values (e.g. 2) give narrower bands and better coverage for densely-listed years. Larger values (e.g. 10) give fewer API calls. Default 5 covers the 1900–2100 range in 40 bands. Only relevant when maxItems > 1000. No effect when startUrls is provided (band-based slicing is not used in URL-sourced mode)."
 		},
 		"slicePriceStep": {
-			"title": "Price Slice Step (EUR)",
+			"title": "Price Slice Step",
 			"type": "integer",
 			"editor": "number",
 			"default": 5000,
 			"minimum": 1000,
 			"maximum": 500000,
-			"description": "Width of each price band (in the same currency as priceCurrency) when auto-slicing by price for year-band result sets that still exceed 1000 visible listings. Smaller values (e.g. 2000) give finer slices; larger values (e.g. 25000) give fewer API calls. Default 5000 gives approximately 100 bands across 0–500k but most above 50k will be empty. Only relevant when maxItems > 1000."
+			"description": "Width of each price band (in the same currency as priceCurrency) when auto-slicing by price for year-band result sets that still exceed 1000 visible listings. Smaller values (e.g. 2000) give finer slices; larger values (e.g. 25000) give fewer API calls. Default 5000 gives approximately 100 bands across 0–500k but most above 50k will be empty. Only relevant when maxItems > 1000. No effect when startUrls is provided (band-based slicing is not used in URL-sourced mode)."
 		}
 	}
 }

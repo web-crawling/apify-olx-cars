@@ -152,6 +152,42 @@
 			"type": "boolean",
 			"default": false,
 			"description": "Emit listings that were in the previous snapshot but absent from the current results (changeType: MISSING). These are likely sold or removed. On active OLX markets, expect 30–50% of tracked listings to appear as MISSING per day. Enable only when you need deletion tracking. Suppressed automatically when the run is capped by maxItems (to avoid false positives). Only used when Incremental Mode is on."
+		},
+		"notifyOn": {
+			"title": "Notify On",
+			"type": "string",
+			"editor": "select",
+			"enum": ["none", "new_listings", "price_drops", "both"],
+			"enumTitles": ["Disabled", "New listings only", "Price drops only", "Both new listings and price drops"],
+			"default": "none",
+			"description": "Controls which events trigger a run-end digest. 'Disabled' produces no digest. 'New listings only' reports listings that appeared since the last run. 'Price drops only' reports listings whose price fell by at least notifyMinPriceDropPct. 'Both' reports new listings and price drops together. Requires Incremental Mode to be enabled — the actor will fail with a clear error if notifyOn is not 'none' and incrementalMode is false.",
+			"sectionCaption": "Notifications",
+			"sectionDescription": "Build a run-end digest of new listings and price drops, and optionally send it to a webhook (Slack, Discord, Make/n8n/Zapier, or any generic HTTP endpoint). Telegram requires a relay; see README."
+		},
+		"notifyMinPriceDropPct": {
+			"title": "Min Price Drop %",
+			"type": "integer",
+			"editor": "number",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 99,
+			"description": "Minimum price reduction percentage vs the previous snapshot price for a listing to appear in the digest's price drops list. A value of 5 means a listing must have dropped by at least 5% to qualify. Only meaningful when notifyOn includes price drops."
+		},
+		"notifyTopN": {
+			"title": "Max Items in Digest",
+			"type": "integer",
+			"editor": "number",
+			"default": 20,
+			"minimum": 1,
+			"maximum": 200,
+			"description": "Maximum number of items to include in each section (new listings, price drops) of the digest payload. New listings are ranked by most-recent first; price drops are ranked by largest drop first. Each section is capped independently."
+		},
+		"notifyWebhookUrl": {
+			"title": "Webhook URL",
+			"type": "string",
+			"editor": "textfield",
+			"default": "",
+			"description": "Optional URL to POST the digest JSON to at run end. Supports Slack incoming webhooks, Discord webhooks, Make/n8n/Zapier, and any generic HTTP endpoint. NOTE: direct POST to Telegram Bot API is NOT supported — Telegram expects a bespoke {chat_id, text} body that does not match the digest shape; use Zapier/Make as a relay (see README). Leave this URL empty to disable outbound HTTP — the digest is always written to the Apify key-value store (olx-cars-notifications) regardless. Keep this URL private — it is stored in run input and visible in run history."
 		}
 	}
 }

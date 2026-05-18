@@ -85,6 +85,12 @@ ITEM_PIPELINES = {
     # we compare the original item values including Nones, avoiding spurious
     # UPDATED signals when a None field becomes absent after the None-strip).
     'src.pipelines.IncrementalDiffPipeline': 200,
+    # NotificationBufferPipeline observes items AFTER IncrementalDiffPipeline
+    # has attached changeType and priceHistory, but BEFORE DropNonesPipeline
+    # strips None values. It is purely observational — never raises DropItem.
+    # Buffers NEW items and qualifying price-drop items for the post-crawl
+    # digest block in main.py. Near-zero overhead when notifyOn='none'.
+    'src.pipelines.NotificationBufferPipeline': 250,
     # DropNonesPipeline must run BEFORE the Apify dataset push pipeline
     # (registered by apply_apify_settings() at priority 1000), so its
     # priority is set between 100 and 1000.

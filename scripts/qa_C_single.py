@@ -46,6 +46,9 @@ settings.set(
         "src.pipelines.MaxItemsPipeline": 100,
         "src.pipelines.HistoryFilterPipeline": 150,
         "src.pipelines.IncrementalDiffPipeline": 200,
+        # NotificationBufferPipeline observes items after IncrementalDiffPipeline
+        # has attached changeType/priceHistory. Purely observational — no DropItem.
+        "src.pipelines.NotificationBufferPipeline": 250,
         "src.pipelines.DropNonesPipeline": 500,
         # FairPricePipeline included to match the production pipeline chain.
         # Items are buffered (DropItem raised) — FEEDS writer receives nothing.

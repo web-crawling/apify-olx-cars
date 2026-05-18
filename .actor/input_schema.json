@@ -144,6 +144,12 @@
 			"minimum": 0,
 			"prefill": 500
 		},
+		"enrichVIN": {
+			"title": "Enrich VIN",
+			"type": "boolean",
+			"default": false,
+			"description": "When enabled, each listing that carries a valid 17-character VIN is enriched with decoded vehicle data from the free NHTSA vPIC API (make, model, engine specs, plant info, and more). Results are cached cross-run in an Apify KV store so the same VIN is never decoded twice. Most useful for Poland (PL) and Ukraine (UA) where OLX sellers routinely disclose VINs; other countries rarely include a VIN in their listings. vPIC lookup failures are non-fatal — the listing is emitted without the vinDecoded field. Excluded from compact output mode."
+		},
 		"incrementalMode": {
 			"title": "Incremental Mode",
 			"type": "boolean",

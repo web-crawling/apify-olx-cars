@@ -37,8 +37,9 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **Not yet supported:** Brazil (olx.com.br) -- runs on a different stack with Cloudflare protection; a separate actor is on the roadmap.
 - **Data source:** OLX's public `/api/v1/offers/` JSON endpoint.
 - **Proxy required:** No.
-- **Output:** JSON -- 44 always-on top-level fields per listing (price, make, model, year, mileage, fuel, transmission, body type, condition raw slug, seller info, location, photo URLs) plus 5 incremental-mode-only fields when `incrementalMode: true`, plus `extraAttributes`, `priceVsMedianPct`, and `priceRating` when applicable. (`conditionRaw` is absent when the listing has no condition param, but is included when present.)
+- **Output:** JSON -- 44 always-on top-level fields per listing (price, make, model, year, mileage, fuel, transmission, body type, condition raw slug, seller info, location, photo URLs) plus 5 incremental-mode-only fields when `incrementalMode: true`, plus `extraAttributes`, `priceVsMedianPct`, `priceRating`, and `vinDecoded` when applicable. (`conditionRaw` is absent when the listing has no condition param, but is included when present.)
 - **Compact output mode:** Set `outputMode: "compact"` to emit an 18-field subset optimised for LLM/RAG pipelines. See the Output mode section below.
+- **Optional VIN enrichment:** Set `enrichVIN: true` to decode 17-character VINs via the free NHTSA vPIC API. Most useful for Poland (40-60% hit rate) and Ukraine (20-40%); other countries rarely disclose VINs.
 - **Throughput:** 40-65 listings per API call; one country's full structured-filter run typically returns up to 1,000 listings before the OLX cap.
 - **Coverage past 1,000 results:** automatic brand-level and year-band slicing when `maxItems > 1000`.
 - **Authentication:** none required -- runs against public listing endpoints.
@@ -53,6 +54,7 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **Normalised vehicle specs** -- `fuelType`, `transmission`, `bodyType`, and `condition` are mapped to consistent English enums across all six countries despite regional API vocabulary differences.
 - **Seller type filtering** -- narrow results to private sellers (`sellerType: "private"`) or dealers (`sellerType: "business"`); universal across all six countries.
 - **History condition filters** -- `excludeDamaged` drops accident/damaged listings client-side; `firstOwnerOnly` keeps only first-owner listings; `serviceBookOnly` (BG-only) keeps only listings with a stamped service book. Each filter applies where OLX exposes the relevant flag (see the per-country support matrix in the Input Parameters section); unsupported countries are skipped silently.
+- **Optional VIN decoding via NHTSA vPIC** -- set `enrichVIN: true` to decode 17-character VINs and add a `vinDecoded` sub-object (make, model, engine, body class, plant, trim) from the free NHTSA API. Results are cached cross-run so the same VIN is never decoded twice. Best on Polish and Ukrainian listings where sellers routinely disclose VINs.
 - **Within-run fair-price rating** -- `priceVsMedianPct` and `priceRating` computed from the listings in each run; useful when running broad queries where enough comparable listings form a bucket.
 - **Country-specific attributes pass-through** -- `extraAttributes` exposes all OLX `params[]` fields not already in top-level output, including door count, engine power, body sub-type, and other locale-specific values.
 - **Compact output mode** -- set `outputMode: "compact"` to emit only 18 core fields; reduces output size by ~60% for LLM/RAG pipelines where per-token cost matters. Use `descriptionMaxLength` to truncate or drop the description field in either mode.
@@ -71,6 +73,7 @@ The table below compares this actor against alternative options for scraping OLX
 | Proxy required | No | -- | -- | -- | -- |
 | Output fields | 44 always-on + 5 incremental | -- | -- | -- | -- |
 | Compact output mode | Yes (18-field subset) | -- | -- | -- | -- |
+| VIN decoding | Yes, via NHTSA vPIC (optional, `enrichVIN: true`) | -- | -- | -- | -- |
 | Incremental / change-tracking mode | Yes | -- | -- | -- | -- |
 | Price history per listing | Yes | -- | -- | -- | -- |
 | Multi-channel notifications / alerts | Slack, Discord, Make, n8n, Zapier (Telegram via relay) | -- | -- | -- | Telegram |
@@ -93,17 +96,99 @@ The table below compares this actor against alternative options for scraping OLX
 
 ### Country notes
 
-**Romania (olx.ro)** -- The highest-volume OLX car market in CEE with approximately 128,000 active listings. Listings commonly carry both EUR and RON prices. The `registrationStatus` field (registered / unregistered) and `steeringWheelSide` are Romania-specific fields.
+**Romania (olx.ro)** -- The highest-volume OLX car market in CEE with approximately 128,000 active listings. Listings commonly carry both EUR and RON prices. The `registrationStatus` field (registered / unregistered) and `steeringWheelSide` are Romania-specific fields. VIN disclosure is rare -- most Romanian listings do not carry a VIN, so `enrichVIN: true` is effectively a no-op for RO.
 
-**Poland (olx.pl)** -- Large market with PLN pricing. Provides `vin`, `drivetrain`, and `steeringWheelSide` fields not available in all countries. VIN disclosure rate is higher in PL than other markets.
+**Poland (olx.pl)** -- Large market with PLN pricing. Provides `vin`, `drivetrain`, and `steeringWheelSide` fields not available in all countries. VIN disclosure rate is higher in PL than other markets. `enrichVIN: true` produces the richest results here (~40-60% of listings carry a VIN that can be decoded).
 
-**Bulgaria (olx.bg)** -- Returns comprehensive feature checklists (comfort, multimedia, safety) merged into the `features` array. See the Limitations section for a note on body type availability in BG.
+**Bulgaria (olx.bg)** -- Returns comprehensive feature checklists (comfort, multimedia, safety) merged into the `features` array. See the Limitations section for a note on body type availability in BG. VIN disclosure is sparse (around 5-10% of listings).
 
-**Portugal (olx.pt)** -- Provides `co2Emissions`, `seatCount`, and `countryOfOrigin` fields. Note: olx.pt hosts cross-listings from standvirtual.com (a sister site). Listings where the offer links out to standvirtual.com are silently skipped; the actor logs a count of skipped offers at run end.
+**Portugal (olx.pt)** -- Provides `co2Emissions`, `seatCount`, and `countryOfOrigin` fields. Note: olx.pt hosts cross-listings from standvirtual.com (a sister site). Listings where the offer links out to standvirtual.com are silently skipped; the actor logs a count of skipped offers at run end. VIN disclosure is rare.
 
-**Ukraine (olx.ua)** -- Mileage is reported by sellers in thousands of km; the actor normalises this to km automatically (e.g. 139 thou = 139,000 km). Engine capacity is reported in litres and normalised to cm3 (e.g. 1.4 L = 1,400 cm3). Provides `drivetrain`, `doorCount`, `seatCount`, `customsCleared` fields.
+**Ukraine (olx.ua)** -- Mileage is reported by sellers in thousands of km; the actor normalises this to km automatically (e.g. 139 thou = 139,000 km). Engine capacity is reported in litres and normalised to cm3 (e.g. 1.4 L = 1,400 cm3). Provides `drivetrain`, `doorCount`, `seatCount`, `customsCleared` fields. VIN is disclosed on around 20-40% of listings; `enrichVIN: true` produces meaningful results here.
 
-**Kazakhstan (olx.kz)** -- Provides `ownersCount`. Engine size data quality is inconsistent: some sellers enter the value in litres (e.g. `2`), others in cm3 (e.g. `2300`). The actor returns the value exactly as OLX provides it -- see the Limitations section for details and a worked example.
+**Kazakhstan (olx.kz)** -- Provides `ownersCount`. Engine size data quality is inconsistent: some sellers enter the value in litres (e.g. `2`), others in cm3 (e.g. `2300`). The actor returns the value exactly as OLX provides it -- see the Limitations section for details and a worked example. VIN disclosure is rare.
+
+## VIN Enrichment (Optional)
+
+Use the Apify actor `extractify-labs/olx-cars` with `enrichVIN: true`; for any OLX listing in Poland, Ukraine, Romania, Bulgaria, Portugal, or Kazakhstan where the seller discloses a 17-character VIN, it calls the free NHTSA vPIC API and returns a `vinDecoded` object with make, model, year, engine, body, and plant fields.
+
+When `enrichVIN: true`, the actor validates each listing's `vin` field (17-character ISO 3779 format). For valid VINs, it requests decoded data from the [NHTSA vPIC API](https://vpic.nhtsa.dot.gov/api/) and attaches the result as a `vinDecoded` sub-object on the item. If no valid VIN is present, the item is emitted unchanged with no extra HTTP requests. vPIC results are cached in a persistent Apify KV store (`olx-cars-vin-cache`) across runs -- the same VIN is decoded at most once, regardless of how many runs it appears in.
+
+### VIN disclosure rates by country
+
+| Country | VIN available on OLX | Expected `vinDecoded` hit rate |
+|---------|----------------------|-------------------------------|
+| Poland (PL) | Yes -- `vin` param; sellers routinely disclose | ~40-60% of listings |
+| Ukraine (UA) | Yes -- `vin_number` param; sellers sometimes disclose | ~20-40% of listings |
+| Bulgaria (BG) | Sparse -- `vinnomer` param exists but rarely used | ~5-10% |
+| Romania (RO) | Rare -- no dedicated VIN param | ~0-5% |
+| Portugal (PT) | Rare -- no dedicated VIN param | ~0-5% |
+| Kazakhstan (KZ) | Rare | ~0-5% |
+
+For Romania, Portugal, and Kazakhstan, enabling `enrichVIN: true` has no practical effect: no extra HTTP requests are made, and `vinDecoded` will be absent on virtually all items.
+
+### Example: input and output
+
+Input:
+```json
+{
+  "country": "pl",
+  "brands": ["BMW"],
+  "maxItems": 10,
+  "enrichVIN": true
+}
+```
+
+Output (one item with a decoded VIN, one without):
+```json
+[
+  {
+    "offerId": 800123456,
+    "country": "pl",
+    "make": "BMW",
+    "model": "X5",
+    "year": 2019,
+    "vin": "WBAKV210X0L123456",
+    "vinDecoded": {
+      "make": "BMW",
+      "model": "X5",
+      "modelYear": "2019",
+      "bodyClass": "Sport Utility Vehicle (SUV)",
+      "vehicleType": "MULTIPURPOSE PASSENGER VEHICLE (MPV)",
+      "engineCylinders": "6",
+      "engineDisplacementCc": "2993",
+      "engineHp": "265",
+      "fuelTypePrimary": "Diesel",
+      "transmissionStyle": "Automatic",
+      "driveType": "AWD/All Wheel Drive",
+      "plantCountry": "GERMANY",
+      "plantCity": "DINGOLFING",
+      "plantCompanyName": "BMW AG",
+      "manufacturer": "BMW OF NORTH AMERICA, LLC"
+    }
+  },
+  {
+    "offerId": 800123457,
+    "country": "pl",
+    "make": "BMW",
+    "model": "3 Series",
+    "year": 2015,
+    "vin": null
+  }
+]
+```
+
+Note: `series`, `trim`, and `doors` are part of the `vinDecoded` schema but are absent from the example above -- NHTSA does not always carry these fields for EU-market vehicles, and absent fields are dropped rather than set to null.
+
+### Key properties of VIN enrichment
+
+- **Free and requires no API key** -- powered by NHTSA's public vPIC endpoint. No registration or subscription needed.
+- **VIN data is cached cross-run** -- once a VIN is decoded, the result is stored in the `olx-cars-vin-cache` KV store. On subsequent runs with the same vehicles, no new vPIC requests are made. First-run time overhead on a 1,000-item PL run with ~50% VIN rate is approximately 1-2 minutes; subsequent runs are faster due to caching.
+- **Best-effort enrichment** -- if NHTSA has no record for a VIN (unusual for EU-market production vehicles), the `vinDecoded` field is simply absent on that item -- no error is raised and the OLX scrape completes normally. NHTSA outages are handled the same way (graceful degradation; item emitted without `vinDecoded`).
+
+`vinDecoded` is excluded from `outputMode: compact` to keep LLM-friendly payloads lean. `vinDecoded` is also absent on incremental-mode `MISSING` items (which are derived from the prior-run snapshot, not from a live OLX fetch, so no VIN context is available).
+
+---
 
 ## Brazil (olx.com.br) -- Not Available in v1
 
@@ -186,6 +271,19 @@ Sets `excludeDamaged: true` to drop listings where OLX flags the vehicle as dama
 
 When `maxItems > 1000`, the actor automatically slices by brand and year band to retrieve more data. Each slice issues separate API requests; run time and compute cost scale proportionally.
 
+### Decode VINs on Polish listings
+
+```json
+{
+  "country": "pl",
+  "brands": ["BMW"],
+  "maxItems": 100,
+  "enrichVIN": true
+}
+```
+
+Adds `vinDecoded` sub-objects to listings that carry a valid 17-character VIN. Poland has the highest VIN disclosure rate (~40-60%) among the supported countries.
+
 ## Input Parameters
 
 | Name | Type | Required | Default | Description |
@@ -205,6 +303,7 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 | `maxItems` | integer | NO | `1000` | Hard ceiling. OLX caps single queries at 1,000; `> 1000` triggers auto brand x year x price slicing |
 | `outputMode` | enum | NO | `"full"` | `"full"` returns all available fields (default). `"compact"` returns an 18-field subset optimised for LLM/RAG pipelines. See the Output mode section below. |
 | `descriptionMaxLength` | integer | NO | unset | Truncate the `description` field to this many characters. `0` drops the field entirely. Unset = no truncation. Applies in both `full` and `compact` modes. |
+| `enrichVIN` | boolean | NO | `false` | When `true`, each listing that carries a valid 17-character VIN is enriched with decoded vehicle data from the free NHTSA vPIC API (make, model, engine specs, plant info, and more). Results are cached cross-run in an Apify KV store (`olx-cars-vin-cache`) so the same VIN is never decoded twice. Most useful for Poland (PL) and Ukraine (UA) where OLX sellers routinely disclose VINs; other countries rarely include a VIN in their listings. vPIC lookup failures are non-fatal -- the listing is emitted without `vinDecoded`. Excluded from compact output mode. |
 | `incrementalMode` | boolean | NO | `false` | Enable change tracking across runs. See Incremental Monitoring section. |
 | `stateKey` | string | NO | `"olx-cars-state"` | KV store key for the snapshot. Use a unique key per monitoring job. |
 | `emitUnchanged` | boolean | NO | `false` | Also emit listings with no tracked-field changes (`changeType: UNCHANGED`). |
@@ -244,6 +343,7 @@ These 18 fields cover core identification, pricing, and the vehicle attributes m
 
 The following field groups are not present in compact output:
 
+- **VIN enrichment** -- `vinDecoded`. The compact slice is optimised for LLM/RAG token-cost reduction; the 18-field sub-object would undermine that goal. Use `outputMode: "full"` if you need `vinDecoded`.
 - **FairPrice fields** -- `priceVsMedianPct`, `priceRating`. These require run-wide bucket statistics and are absent by design even when they would otherwise be computed.
 - **Incremental tracking** -- `changeType`, `firstSeenAt`, `lastSeenAt`, `priceHistory`, `isRepost`.
 - **Nested objects** -- `seller`, `location`.
@@ -357,6 +457,23 @@ Every output item is a JSON object. Most fields are always present -- fields wit
 }
 ```
 
+The `vinDecoded` field is absent in the example above because `vin` is null. A Polish listing with a disclosed VIN and `enrichVIN: true` would carry an additional field:
+
+```json
+"vinDecoded": {
+  "make": "BMW",
+  "model": "X5",
+  "modelYear": "2019",
+  "bodyClass": "Sport Utility Vehicle (SUV)",
+  "plantCountry": "GERMANY",
+  "plantCity": "DINGOLFING",
+  "plantCompanyName": "BMW AG",
+  "manufacturer": "BMW OF NORTH AMERICA, LLC"
+}
+```
+
+(Fields absent from the NHTSA response for EU-market VINs -- such as `series`, `trim`, `doors` -- are omitted rather than set to null.)
+
 ### Output fields reference
 
 | Field | Type | Nullable | Notes |
@@ -425,6 +542,27 @@ Every output item is a JSON object. Most fields are always present -- fields wit
 | `extraAttributes` | object | YES | Flat `{key: label}` dict of all OLX `params[]` entries for this listing. Covers country-specific attributes not surfaced as dedicated top-level fields. Keys are OLX param keys; values are the localised label strings as provided by OLX (Romanian on RO, Polish on PL, Bulgarian Cyrillic on BG, etc.). Some keys duplicate top-level fields (e.g. `fuel_type` appears here as a localised label alongside the normalised `fuelType` enum). Absent when `params[]` is empty. |
 | `priceVsMedianPct` | number | YES | Percentage deviation of this listing's price from the within-run bucket median. Bucket key: same `make`, `model`, 5-year year-band, 50,000 km mileage-band, and currency. Requires at least 5 listings in the bucket; absent otherwise, or when price is undisclosed, or for `MISSING` incremental items (stale prices excluded). This is a within-run comparison, not a historical market median. Typical single-country single-brand runs rate ~40 % of items; very narrow runs or rare brands may still yield few rated items. |
 | `priceRating` | string | YES | Qualitative price rating derived from `priceVsMedianPct`. Values: `very_good` (≤ -15 %), `good` (-15 % to -5 %), `fair` (±5 %), `high` (5 % to 15 %), `very_high` (≥ 15 %). Absent when `priceVsMedianPct` is absent. |
+| `vinDecoded` | object | YES | Decoded vehicle data from the NHTSA vPIC API. Present only when `enrichVIN: true` AND the listing carries a valid 17-character VIN AND the vPIC lookup succeeded and returned at least one populated field. Absent otherwise (field omitted, not null). Excluded from `outputMode: compact`. Also absent on incremental `MISSING` items (snapshot-derived; no live VIN context). See the VIN enrichment sub-fields below. |
+| `vinDecoded.make` | string | YES | Authoritative OEM make from NHTSA (e.g. `BMW`). May differ from the OLX-derived top-level `make` field -- useful as a cross-check. |
+| `vinDecoded.model` | string | YES | Authoritative OEM model (e.g. `X5`). |
+| `vinDecoded.modelYear` | string | YES | Model year as a string (e.g. `"2019"`). |
+| `vinDecoded.bodyClass` | string | YES | NHTSA body class (e.g. `Sport Utility Vehicle (SUV)`). |
+| `vinDecoded.vehicleType` | string | YES | NHTSA vehicle type (e.g. `PASSENGER CAR`, `MULTIPURPOSE PASSENGER VEHICLE (MPV)`). |
+| `vinDecoded.engineCylinders` | string | YES | Number of engine cylinders as a string (e.g. `"6"`). |
+| `vinDecoded.engineDisplacementCc` | string | YES | Engine displacement in CC as a string (e.g. `"2993"`). |
+| `vinDecoded.engineHp` | string | YES | Rated engine power in HP as a string (e.g. `"265"`). |
+| `vinDecoded.fuelTypePrimary` | string | YES | Primary fuel type in NHTSA vocabulary (e.g. `Gasoline`, `Diesel`, `Electric`). Note: vocabulary differs from the top-level normalised `fuelType` field. |
+| `vinDecoded.transmissionStyle` | string | YES | Transmission style from NHTSA (e.g. `Automatic`, `Manual`). |
+| `vinDecoded.driveType` | string | YES | Drive type from NHTSA (e.g. `AWD/All Wheel Drive`, `Front-Wheel Drive`). |
+| `vinDecoded.plantCountry` | string | YES | Country where the vehicle was manufactured (e.g. `GERMANY`). |
+| `vinDecoded.plantCity` | string | YES | City where the vehicle was manufactured (e.g. `MUNICH`). |
+| `vinDecoded.plantCompanyName` | string | YES | Plant operator company name (e.g. `BMW AG`). |
+| `vinDecoded.manufacturer` | string | YES | Registered NHTSA manufacturer name (e.g. `BMW OF NORTH AMERICA, LLC`). |
+| `vinDecoded.series` | string | YES | Trim series identifier (e.g. `xDrive35i`). |
+| `vinDecoded.trim` | string | YES | Variant trim level (e.g. `xLine`, `Sport`). |
+| `vinDecoded.doors` | string | YES | Door count from VIN decode as a string (e.g. `"4"`). |
+
+**Note on `vinDecoded` sub-field coverage:** All 18 fields are declared in the schema, but in practice EU-market VINs often populate only a subset. The NHTSA vPIC database is US-centric: plant country/city/company and manufacturer are reliably populated for European production vehicles; model-level fields (series, trim, doors) are less consistently available. Fields that NHTSA returns as empty or "Not Applicable" are omitted from the output rather than set to null. Expect 4-10 populated sub-fields on a typical EU-market VIN rather than all 18.
 
 ## Use Cases
 
@@ -447,6 +585,10 @@ Build a catalogue of the active used-car inventory for a brand, segment, or year
 ### Resale-Time and Listing-Quality Analysis
 
 Analyse how listing attributes correlate with time-on-market or perceived listing quality. The actor exposes `postedAt`, `refreshedAt`, `validTo`, `promotionFlags` (highlighted, topAd, urgent), `images` (count and CDN URLs), and `description` length -- together a rich feature set for "what makes a car listing sell faster" or "are promoted listings overpriced" studies.
+
+### VIN-Based Vehicle Data Enrichment
+
+Combine OLX listing data with authoritative OEM specifications. Set `enrichVIN: true` and `country: "pl"` (or `"ua"`) to retrieve decoded NHTSA data -- make, model, engine specs, body class, and plant of manufacture -- for listings that disclose a VIN. Use the `vinDecoded.make` and `vinDecoded.model` fields as a cross-check against the OLX-derived `make` and `model` fields to detect data entry errors. Cross-reference `vinDecoded.plantCountry` and `vinDecoded.plantCompanyName` with the seller's asking price for provenance-based pricing studies.
 
 ### Feeding LLM and ML Pipelines with Structured Vehicle Data
 
@@ -860,7 +1002,13 @@ If you need a heuristic body-type classification for BG listings, read the `para
 
 **Notification KV write failure DOES fail the actor run.** If the actor cannot write the digest to the `olx-cars-notifications` KV store (e.g., transient storage outage), the run is marked `FAILED` via `Actor.fail()`. This asymmetry is intentional: a failed KV write would silently break the user's notification pipeline, while a failed webhook POST is recoverable since the digest is still queryable from KV.
 
-**Compact mode (`outputMode: "compact"`) excludes FairPrice, nested objects, media, and incremental fields.** If your workflow uses `priceVsMedianPct`, `priceRating`, `seller`, `location`, `images`, or incremental tracking fields, use `outputMode: "full"` (the default). See the Output mode section for the full field list.
+**Compact mode (`outputMode: "compact"`) excludes FairPrice, VIN enrichment, nested objects, media, and incremental fields.** If your workflow uses `vinDecoded`, `priceVsMedianPct`, `priceRating`, `seller`, `location`, `images`, or incremental tracking fields, use `outputMode: "full"` (the default). See the Output mode section for the full field list.
+
+**VIN disclosure is voluntary and varies by country.** Sellers in Romania, Bulgaria, Portugal, and Kazakhstan rarely include a VIN in their OLX listings. Setting `enrichVIN: true` on these countries adds no HTTP overhead (no vPIC requests are made when no VIN is present) but will produce `vinDecoded` on virtually no items. Poland and Ukraine have the highest VIN disclosure rates (20-60% of listings); these are the only markets where `enrichVIN: true` is worth enabling.
+
+**NHTSA vPIC data coverage is sparse for EU-market vehicles.** The NHTSA vPIC database is US-centric. For European production vehicles (which represent the majority of OLX listings), plant country/city/company and manufacturer fields are reliably populated; model/trim/series/doors fields are often absent. In a sample of Polish BMW listings, only 5 of 18 declared sub-fields were populated. `vinDecoded` is not a substitute for a vehicle history service (CARFAX, AutoScout24 Histcheck, etc.) -- it returns static OEM manufacture data from the VIN, not accident history, ownership records, or service history.
+
+**VIN enrichment on incremental `MISSING` items is not supported.** Items emitted with `changeType: MISSING` come from the prior-run snapshot, not from a live OLX fetch. No VIN context is available for re-decoding, so `vinDecoded` is absent on all MISSING items even when `enrichVIN: true`.
 
 ## Frequently Asked Questions
 
@@ -882,6 +1030,9 @@ No. The actor returns `seller.hasPhone` as a boolean only -- `true` means the se
 **Do I need a proxy subscription to run this actor?**
 No. The actor calls OLX's public `/api/v1/offers/` endpoint using direct datacenter IP access. No residential or datacenter proxy subscription is required.
 
+**How do I decode VINs from OLX car listings?**
+Set `enrichVIN: true` in your input. For any listing in Poland, Ukraine, Romania, Bulgaria, Portugal, or Kazakhstan that carries a valid 17-character VIN, the actor calls the free NHTSA vPIC API and returns a `vinDecoded` sub-object with make, model, year, engine specs, body class, and plant information. Poland and Ukraine have the highest VIN disclosure rates (40-60% and 20-40% respectively). The feature is free and requires no API key. Results are cached across runs so the same VIN is decoded at most once.
+
 **How does the 1,000-result OLX API cap work, and how does this actor handle it?**
 OLX's API rejects pagination requests beyond offset 1,000 with HTTP 400. A single unfiltered country-wide query therefore returns at most 1,000 listings. When `maxItems <= 1000`, the actor uses a single paginated query (fast and inexpensive). When `maxItems > 1000`, the actor automatically splits the request into brand-level sub-queries and, where needed, further into year-band and price-band sub-queries. Each sub-slice is paginated independently. This increases run time and cost proportionally but allows retrieval of far more than 1,000 listings.
 
@@ -892,7 +1043,7 @@ Yes. Set `brands` to an array of brand names (e.g. `["BMW", "Toyota"]`), `yearFr
 Go to the OLX website for your country, apply the filters you want (brand, year, price, etc.) using the site's own interface, then copy the resulting search URL. Paste it as a `{ "url": "..." }` object in the `startUrls` array. The actor will paginate through all results from that pre-filtered URL up to `maxItems`. The country is auto-detected from the hostname -- no additional configuration needed.
 
 **How do I reduce token cost when feeding output to an LLM?**
-Set `outputMode: "compact"` to emit only the 18 core fields (`offerId`, `url`, `country`, `title`, `price`, `currency`, `make`, `model`, `year`, `mileageKm`, `fuelType`, `transmission`, `bodyType`, `condition`, `description`, `engineCapacityCm3`, `powerHp`, `color`). This cuts output size by roughly 60% compared to the full schema. You can also set `descriptionMaxLength` (e.g. `300`) to cap long listing descriptions, which are often the largest field by character count. Note: compact mode excludes `priceVsMedianPct`, `priceRating`, `seller`, `location`, and all incremental tracking fields. If you need any of those, use `outputMode: "full"`.
+Set `outputMode: "compact"` to emit only the 18 core fields (`offerId`, `url`, `country`, `title`, `price`, `currency`, `make`, `model`, `year`, `mileageKm`, `fuelType`, `transmission`, `bodyType`, `condition`, `description`, `engineCapacityCm3`, `powerHp`, `color`). This cuts output size by roughly 60% compared to the full schema. You can also set `descriptionMaxLength` (e.g. `300`) to cap long listing descriptions, which are often the largest field by character count. Note: compact mode excludes `vinDecoded`, `priceVsMedianPct`, `priceRating`, `seller`, `location`, and all incremental tracking fields. If you need any of those, use `outputMode: "full"`.
 
 **What output formats are supported?**
 The actor outputs structured JSON to Apify's dataset. From the Apify console or via the API, you can export as JSON, CSV, Excel (XLSX), or XML. The dataset also integrates with Google Sheets via the Apify Google Sheets integration and any HTTP-based integration via the Apify API.
@@ -935,3 +1086,4 @@ See [.actor/CHANGELOG.md](https://github.com/web-crawling/apify-olx-cars/blob/ma
 ## Support
 
 Report bugs and request features via the [GitHub issue tracker](https://github.com/web-crawling/apify-olx-cars/issues).
+

@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Generator
 from urllib.parse import urlencode, urlparse, parse_qs, urljoin
@@ -114,6 +115,49 @@ PRICE_BANDS = [
 ]
 
 PAGE_LIMIT = 50
+
+# ---------------------------------------------------------------------------
+# VIN enrichment helpers (#19)
+# ---------------------------------------------------------------------------
+
+# VIN standard: 17 alphanumeric characters, I/O/Q excluded.
+_VIN_RE = re.compile(r'^[A-HJ-NPR-Z0-9]{17}$')
+
+
+def _is_valid_vin(vin: str) -> bool:
+    """Return True if *vin* (after upper-casing) looks like a valid VIN.
+
+    Applies the ISO 3779 character-set rule: 17 chars, I/O/Q excluded.
+    Does not perform the check-digit (9th position) calculation — NHTSA
+    accepts VINs with non-US check digits (EU/Asian vehicles).
+    """
+    return bool(_VIN_RE.match(vin.upper())) if vin else False
+
+
+# Maps vinDecoded sub-field names → NHTSA "Variable" strings.
+# All 18 fields are typed string in dataset_schema.json; NHTSA returns
+# all values as JSON strings (including numeric fields like cylinders/doors).
+# Null/empty NHTSA values are filtered out in parse_vpic() before caching.
+VPIC_FIELD_MAP: dict[str, str] = {
+    'make':                  'Make',
+    'model':                 'Model',
+    'modelYear':             'Model Year',
+    'bodyClass':             'Body Class',
+    'vehicleType':           'Vehicle Type',
+    'engineCylinders':       'Engine Number of Cylinders',
+    'engineDisplacementCc':  'Displacement (CC)',
+    'engineHp':              'Engine Brake (hp) From',
+    'fuelTypePrimary':       'Fuel Type - Primary',
+    'transmissionStyle':     'Transmission Style',
+    'driveType':             'Drive Type',
+    'plantCountry':          'Plant Country',
+    'plantCity':             'Plant City',
+    'plantCompanyName':      'Plant Company Name',
+    'manufacturer':          'Manufacturer Name',
+    'series':                'Series',
+    'trim':                  'Trim',
+    'doors':                 'Doors',
+}
 
 
 def _load_brand_categories() -> dict[str, dict[str, dict[str, object]]]:
@@ -229,6 +273,12 @@ class OlxCarsSpider(scrapy.Spider):
     # See src/main.py module docstring for the full rationale.
     crawl_failed: bool = False
 
+    # VIN enrichment counters (#19) — class attributes reset by main.py pre-run.
+    # Best-effort: errors do NOT set crawl_failed; vPIC outages should not abort
+    # a successful OLX scrape. main.py reads these after the crawl for INFO logging.
+    _vpic_success_count: int = 0
+    _vpic_error_count: int = 0
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
@@ -261,6 +311,14 @@ class OlxCarsSpider(scrapy.Spider):
         Precedence: startUrls > structured filters.
         """
         input_data: dict[str, Any] = self.settings.get('INPUT_DATA') or {}
+
+        # --- VIN enrichment settings (#19) ---
+        self._enrich_vin: bool = bool(input_data.get('enrichVIN', False))
+        # _vinCache is the opened named KV store object (set by main.py),
+        # or None when enrichVIN=false. We store it as an instance attribute so
+        # parse_listing (async) and parse_vpic can access it without re-reading
+        # INPUT_DATA on every call.
+        self._vin_cache = input_data.get('_vinCache')
 
         start_urls_raw: list = input_data.get('startUrls') or []
         country: str = str(input_data.get('country') or 'ro').lower()
@@ -521,7 +579,7 @@ class OlxCarsSpider(scrapy.Spider):
     # Parse: listing API page
     # ------------------------------------------------------------------
 
-    def parse_listing(
+    async def parse_listing(
         self,
         response,
         domain: str,
@@ -532,11 +590,17 @@ class OlxCarsSpider(scrapy.Spider):
         offset: int,
         cat_l2_name: str | None,
         slice_label: str,
-    ) -> Generator:
+    ):
         """Parse one page of OLX listing API results.
 
         Yields CarItems and schedules the next page when more results exist.
         Also handles the 1000-cap detection and brand×year sub-slicing.
+
+        This is an async def to enable awaiting the VIN cache KV store look-up
+        when enrichVIN=true. Scrapy supports async spider callbacks natively
+        when using the Twisted asyncio reactor (already configured in settings.py
+        via TWISTED_REACTOR). `yield from` is not permitted inside `async def`
+        generators — all pagination sub-generators use explicit `for` loops.
         """
         if response.status == 400:
             # Expected when offset > 1000 — normal pagination termination
@@ -627,13 +691,50 @@ class OlxCarsSpider(scrapy.Spider):
                     self.skipped_partner_count += 1
                     continue
 
-            yield self._make_item(
+            item = self._make_item(
                 offer=offer,
                 country=country,
                 cat_l2_name=cat_l2_name,
                 scraped_at=scraped_at,
             )
             self._total_yielded += 1
+
+            # --- VIN enrichment (#19) ---
+            if self._enrich_vin and self._vin_cache is not None:
+                vin = item.get('vin') or ''
+                vin_upper = vin.upper() if vin else ''
+                if vin_upper and _is_valid_vin(vin_upper):
+                    # Check the cross-run cache first (avoids redundant vPIC calls)
+                    cached = await self._vin_cache.get_value(vin_upper)
+                    if cached is not None:
+                        # Cache hit: {} means "known-empty VIN" (no NHTSA data)
+                        item['vinDecoded'] = cached if cached else None
+                        yield item
+                    else:
+                        # Cache miss: queue a vPIC request; item yielded in callback
+                        vpic_url = (
+                            f'https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/'
+                            f'{vin_upper}?format=json'
+                        )
+                        yield scrapy.Request(
+                            url=vpic_url,
+                            method='GET',
+                            callback=self.parse_vpic,
+                            errback=self.errback_vpic,
+                            cb_kwargs={'item': item, 'vin': vin_upper},
+                            meta={
+                                'download_slot': 'vpic',
+                                'download_timeout': 10,
+                                # All non-2xx codes must reach errback_vpic;
+                                # without this they are swallowed by HttpErrorMiddleware.
+                                'handle_httpstatus_list': [404, 429, 500, 503],
+                            },
+                        )
+                    # Item is yielded via the vPIC path (callback or cache hit above);
+                    # do not fall through to the direct yield below.
+                    continue
+            # No valid VIN or enrichVIN=false: yield item directly.
+            yield item
 
         # ------------------------------------------------------------------
         # Pagination: schedule next page
@@ -667,7 +768,7 @@ class OlxCarsSpider(scrapy.Spider):
                     'Sub-slicing by year bands.',
                     slice_label, visible_total_count,
                 )
-                yield from self._year_band_requests(
+                for req in self._year_band_requests(
                     domain=domain,
                     country=country,
                     category_id=category_id,
@@ -675,13 +776,14 @@ class OlxCarsSpider(scrapy.Spider):
                     sort_by=sort_by,
                     cat_l2_name=cat_l2_name,
                     parent_slice_label=slice_label,
-                )
+                ):
+                    yield req
             return
 
         if self._max_items > 0 and self._total_yielded >= self._max_items:
             return
 
-        yield from self._page_requests(
+        for req in self._page_requests(
             domain=domain,
             country=country,
             category_id=category_id,
@@ -690,7 +792,8 @@ class OlxCarsSpider(scrapy.Spider):
             offset=next_offset,
             cat_l2_name=cat_l2_name,
             slice_label=slice_label,
-        )
+        ):
+            yield req
 
     def _year_band_requests(
         self,
@@ -749,6 +852,115 @@ class OlxCarsSpider(scrapy.Spider):
                 cat_l2_name=cat_l2_name,
                 slice_label=label,
             )
+
+    # ------------------------------------------------------------------
+    # VIN enrichment callbacks (#19)
+    # ------------------------------------------------------------------
+
+    async def parse_vpic(self, response, item, vin):
+        """Handle NHTSA vPIC response for a single VIN.
+
+        Merges decoded vehicle data into item['vinDecoded'] and caches
+        the result in the named KV store for cross-run reuse.
+
+        Non-2xx responses (404, 429, 500, 503) are routed here via
+        handle_httpstatus_list; they are treated as enrichment failures
+        and the item is yielded without vinDecoded (graceful degradation).
+
+        Empty/null NHTSA values are filtered out: any value whose
+        stripped lowercase form is in {'', 'null', 'not applicable', '0'}
+        is discarded so that vinDecoded only carries meaningful data.
+
+        On parse failure: increments _vpic_error_count, logs WARNING,
+        item yielded without vinDecoded. Does NOT set crawl_failed —
+        vPIC enrichment is best-effort by design.
+        """
+        # Non-2xx: route as enrichment failure (no vinDecoded, no cache write).
+        # handle_httpstatus_list allows these to reach the callback instead of
+        # errback so we can still yield the item; errback_vpic handles network
+        # errors (timeout, DNS failure, etc.) via the same graceful path.
+        if response.status != 200:
+            logger.info(
+                'vPIC: non-2xx status %d for VIN %s — enrichment skipped (non-fatal).',
+                response.status, vin,
+            )
+            type(self)._vpic_error_count += 1
+            yield item
+            return
+
+        try:
+            data = response.json()
+            results = data.get('Results') or []
+
+            # Build a flat variable-name → value lookup from the Results list.
+            # NHTSA returns ~100 entries; each is {"Variable": "...", "Value": "...", ...}.
+            raw_lookup: dict[str, str | None] = {
+                r['Variable']: r.get('Value')
+                for r in results
+                if isinstance(r, dict) and r.get('Variable')
+            }
+
+            # Extract the 18 curated fields; discard nulls and semantically-empty values.
+            _EMPTY_VALUES = {'', 'null', 'not applicable', '0'}
+            decoded: dict[str, str] = {}
+            for out_key, vpic_var in VPIC_FIELD_MAP.items():
+                val = raw_lookup.get(vpic_var)
+                if val and isinstance(val, str):
+                    val_stripped = val.strip()
+                    if val_stripped and val_stripped.lower() not in _EMPTY_VALUES:
+                        decoded[out_key] = val_stripped
+
+            if decoded:
+                # VIN successfully decoded: attach to item and cache for future runs.
+                item['vinDecoded'] = decoded
+                await self._vin_cache.set_value(vin, decoded)
+                type(self)._vpic_success_count += 1
+            else:
+                # VIN is valid but NHTSA has no data for it (rare for EU-market cars).
+                # Cache an empty dict so we skip re-querying this VIN on future runs.
+                item['vinDecoded'] = None  # stripped by DropNonesPipeline
+                await self._vin_cache.set_value(vin, {})
+                logger.debug(
+                    'vPIC: VIN %s returned no decodable fields from NHTSA — '
+                    'caching empty result to skip future re-queries.',
+                    vin,
+                )
+
+        except Exception as exc:
+            # Parse error (malformed JSON, unexpected structure, etc.).
+            # Non-fatal: item is still yielded without vinDecoded.
+            logger.warning(
+                'vPIC: failed to parse response for VIN %s: %s. '
+                'Item emitted without vinDecoded.',
+                vin, exc,
+            )
+            item['vinDecoded'] = None  # stripped by DropNonesPipeline
+            type(self)._vpic_error_count += 1
+
+        yield item
+
+    def errback_vpic(self, failure) -> Generator:
+        """Handle network-level errors on vPIC requests.
+
+        Recovers the in-flight item from the failed request's cb_kwargs,
+        increments the class-level error counter, logs the failure at INFO
+        (not ERROR — enrichment is best-effort), and yields the item
+        without a vinDecoded field so the OLX scrape result is preserved.
+
+        Does NOT set crawl_failed — a NHTSA outage must not abort the
+        OLX scrape. vPIC enrichment is best-effort by design.
+        """
+        cb_kwargs = failure.request.cb_kwargs
+        item = cb_kwargs.get('item')
+        vin = cb_kwargs.get('vin', '<unknown>')
+        type(self)._vpic_error_count += 1
+        logger.info(
+            'vPIC enrichment failed for VIN %s (non-fatal): %s. '
+            'Item emitted without vinDecoded.',
+            vin, failure.getErrorMessage(),
+        )
+        if item is not None:
+            yield item
 
     # ------------------------------------------------------------------
     # Item construction
@@ -1202,6 +1414,15 @@ class OlxCarsSpider(scrapy.Spider):
                 'Skipped %d offers on olx.pt that link to standvirtual.com '
                 '(a sister site not covered by this actor).',
                 self.skipped_partner_count,
+            )
+
+        # VIN enrichment summary (#19)
+        if getattr(self, '_enrich_vin', False):
+            logger.info(
+                'vPIC enrichment: %d succeeded, %d failed '
+                '(enrichment skipped for failed items).',
+                type(self)._vpic_success_count,
+                type(self)._vpic_error_count,
             )
 
         # Check for cap warnings across all slices

@@ -312,6 +312,84 @@
 						"description": "True when map.show_detailed is false, meaning coordinates are snapped to a neighbourhood centroid rather than the exact address"
 					}
 				}
+			},
+			"vinDecoded": {
+				"type": "object",
+				"description": "Decoded VIN data from the NHTSA vPIC API. Present only when enrichVIN is true AND the listing carries a valid 17-character VIN AND the vPIC call succeeded. Absent otherwise. Excluded from compact output mode.",
+				"properties": {
+					"make": {
+						"type": "string",
+						"description": "Authoritative OEM make from NHTSA (e.g. BMW). May differ from the OLX-derived make field."
+					},
+					"model": {
+						"type": "string",
+						"description": "Authoritative OEM model from NHTSA (e.g. X5)."
+					},
+					"modelYear": {
+						"type": "string",
+						"description": "Model year as a string (e.g. 2019)."
+					},
+					"bodyClass": {
+						"type": "string",
+						"description": "NHTSA body class (e.g. Sport Utility Vehicle (SUV))."
+					},
+					"vehicleType": {
+						"type": "string",
+						"description": "NHTSA vehicle type (e.g. PASSENGER CAR, MULTIPURPOSE PASSENGER VEHICLE (MPV))."
+					},
+					"engineCylinders": {
+						"type": "string",
+						"description": "Number of engine cylinders as a string (e.g. 6)."
+					},
+					"engineDisplacementCc": {
+						"type": "string",
+						"description": "Engine displacement in CC as a string (e.g. 2993)."
+					},
+					"engineHp": {
+						"type": "string",
+						"description": "Rated engine power in HP as a string (e.g. 265)."
+					},
+					"fuelTypePrimary": {
+						"type": "string",
+						"description": "Primary fuel type in NHTSA vocabulary (e.g. Gasoline, Diesel, Electric)."
+					},
+					"transmissionStyle": {
+						"type": "string",
+						"description": "Transmission style from NHTSA (e.g. Automatic, Manual)."
+					},
+					"driveType": {
+						"type": "string",
+						"description": "Drive type from NHTSA (e.g. AWD/All Wheel Drive, Front-Wheel Drive)."
+					},
+					"plantCountry": {
+						"type": "string",
+						"description": "Country where the vehicle was manufactured (e.g. GERMANY)."
+					},
+					"plantCity": {
+						"type": "string",
+						"description": "City where the vehicle was manufactured (e.g. MUNICH)."
+					},
+					"plantCompanyName": {
+						"type": "string",
+						"description": "Plant operator company name (e.g. BMW AG)."
+					},
+					"manufacturer": {
+						"type": "string",
+						"description": "Registered NHTSA manufacturer name (e.g. BMW OF NORTH AMERICA, LLC)."
+					},
+					"series": {
+						"type": "string",
+						"description": "Trim series identifier (e.g. xDrive35i)."
+					},
+					"trim": {
+						"type": "string",
+						"description": "Variant trim level (e.g. xLine, Sport)."
+					},
+					"doors": {
+						"type": "string",
+						"description": "Door count from VIN decode as a string (e.g. 4)."
+					}
+				}
 			}
 		}
 	},

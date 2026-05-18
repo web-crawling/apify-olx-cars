@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.1.0 -- 2026-05-18
+
+### Added
+- **Optional VIN enrichment via NHTSA vPIC** -- set `enrichVIN: true` to decode 17-character
+  VINs and attach a `vinDecoded` sub-object (make, model, year, engine specs, body class, plant,
+  trim) using the free NHTSA vPIC API. No API key required. Results are cached cross-run in
+  a dedicated Apify KV store (`olx-cars-vin-cache`) so the same VIN is never decoded twice.
+  Best on Poland (40-60% listing hit rate) and Ukraine (20-40%); other countries rarely disclose
+  VINs on OLX. vPIC failures are non-fatal -- the listing is emitted without `vinDecoded` and
+  the OLX scrape completes normally. `vinDecoded` contains up to 18 sub-fields: `make`, `model`,
+  `modelYear`, `bodyClass`, `vehicleType`, `engineCylinders`, `engineDisplacementCc`, `engineHp`,
+  `fuelTypePrimary`, `transmissionStyle`, `driveType`, `plantCountry`, `plantCity`,
+  `plantCompanyName`, `manufacturer`, `series`, `trim`, `doors` (all strings; absent fields
+  omitted rather than null). `vinDecoded` is excluded from `outputMode: compact` and from
+  incremental `MISSING` items. Closes
+  [#19](https://github.com/web-crawling/apify-olx-cars/issues/19).
+
 ## v1.0.0 -- 2026-05-18
 
 ### Added

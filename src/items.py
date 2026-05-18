@@ -94,3 +94,6 @@ class CarItem(scrapy.Item):
 
     # --- Raw condition slug(s) before normalisation (#23) ---------------------
     conditionRaw = scrapy.Field()  # str | None; set directly on item in spider, loader bypassed (UA arrays are ';'-joined)
+
+    # --- VIN enrichment decoded sub-object (#19) ------------------------------
+    vinDecoded = scrapy.Field()    # dict | None; set directly on item in spider (bypasses loader); absent when enrichVIN=false or VIN invalid/missing; stripped by DropNonesPipeline when None; excluded from compact outputMode

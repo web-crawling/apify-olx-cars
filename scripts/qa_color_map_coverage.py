@@ -250,7 +250,7 @@ def check_slug_vocabulary(
     canonical_slugs = {
         "black", "white", "silver", "gray", "red", "blue", "green",
         "yellow", "orange", "brown", "beige", "gold", "purple",
-        "bordeaux", "other",
+        "other",
     }
     all_ok = True
     for country_code, color_map in (("ua", ua_map), ("kz", kz_map)):

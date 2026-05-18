@@ -29,6 +29,17 @@ class MockKVStore:
 
 mock_vin_cache = MockKVStore()
 
+# As of the lazy-open fix (#61), the spider opens the named KV store via
+# `Actor.open_key_value_store(name='olx-cars-vin-cache')` on first VIN-bearing
+# item. Patch that call to return our in-memory mock instead of touching the
+# real Apify SDK.
+from unittest.mock import AsyncMock, patch
+from apify import Actor
+_open_kvs_patcher = patch.object(
+    Actor, "open_key_value_store", new=AsyncMock(return_value=mock_vin_cache),
+)
+_open_kvs_patcher.start()
+
 # Reset class attrs
 OlxCarsSpider.crawl_failed = False
 OlxCarsSpider._vpic_success_count = 0
@@ -50,7 +61,6 @@ settings.set("INPUT_DATA", {
     "brands": ["bmw"],
     "maxItems": 8,
     "enrichVIN": True,
-    "_vinCache": mock_vin_cache,   # in-memory mock
     "startUrls": [],
     "sortBy": "created_at:desc",
     "excludeDamaged": False,

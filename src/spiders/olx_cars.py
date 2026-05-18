@@ -314,11 +314,14 @@ class OlxCarsSpider(scrapy.Spider):
 
         # --- VIN enrichment settings (#19) ---
         self._enrich_vin: bool = bool(input_data.get('enrichVIN', False))
-        # _vinCache is the opened named KV store object (set by main.py),
-        # or None when enrichVIN=false. We store it as an instance attribute so
-        # parse_listing (async) and parse_vpic can access it without re-reading
-        # INPUT_DATA on every call.
-        self._vin_cache = input_data.get('_vinCache')
+        # The named KV store `olx-cars-vin-cache` is opened lazily on first
+        # use inside parse_listing (which is async). Lazy-open is REQUIRED:
+        # CrawlerRunner deep-copies Scrapy settings, and the Apify SDK's
+        # KeyValueStoreClient wraps a builtins.Client that is not picklable
+        # (`TypeError: cannot pickle 'builtins.Client' object`). Opening
+        # here in start_requests would put a non-picklable object in spider
+        # state that CrawlerRunner cannot copy.
+        self._vin_cache = None
 
         start_urls_raw: list = input_data.get('startUrls') or []
         country: str = str(input_data.get('country') or 'ro').lower()
@@ -700,10 +703,21 @@ class OlxCarsSpider(scrapy.Spider):
             self._total_yielded += 1
 
             # --- VIN enrichment (#19) ---
-            if self._enrich_vin and self._vin_cache is not None:
+            if self._enrich_vin:
                 vin = item.get('vin') or ''
                 vin_upper = vin.upper() if vin else ''
                 if vin_upper and _is_valid_vin(vin_upper):
+                    # Lazy-open the named KV cache on first VIN-bearing item.
+                    # See start_requests comment for why this is not opened
+                    # in main.py.
+                    if self._vin_cache is None:
+                        from apify import Actor
+                        self._vin_cache = await Actor.open_key_value_store(
+                            name='olx-cars-vin-cache',
+                        )
+                        self.logger.info(
+                            'VIN enrichment: KV cache "olx-cars-vin-cache" opened.',
+                        )
                     # Check the cross-run cache first (avoids redundant vPIC calls)
                     cached = await self._vin_cache.get_value(vin_upper)
                     if cached is not None:

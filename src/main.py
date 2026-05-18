@@ -163,16 +163,14 @@ async def main() -> None:
             )
             notify_webhook_url = ''
 
-        # --- VIN enrichment KV store setup (#19) ---
+        # --- VIN enrichment flag (#19) ---
+        # The cache (named KV store `olx-cars-vin-cache`) is opened lazily by
+        # the spider on first use. We CANNOT open it here and pass the store
+        # object via INPUT_DATA: Scrapy's CrawlerRunner deep-copies settings,
+        # and the Apify SDK KV-store client wraps a builtins.Client that is
+        # not picklable (`TypeError: cannot pickle 'builtins.Client' object`).
+        # Lazy-open inside the async spider sidesteps the deepcopy entirely.
         enrich_vin = bool(actor_input.get('enrichVIN', False))
-        vin_cache = None
-        if enrich_vin:
-            # IMPORTANT: open a NAMED key-value store. Without `name=...`,
-            # Actor.open_key_value_store() returns the per-run default store,
-            # which is unique to each run — cache would never persist across
-            # runs (see MEMORY.md `project_apify_named_kv_store.md`).
-            vin_cache = await Actor.open_key_value_store(name='olx-cars-vin-cache')
-            Actor.log.info('VIN enrichment: KV cache "olx-cars-vin-cache" opened.')
 
         snapshot: dict = {}
         kv_store = None
@@ -231,7 +229,6 @@ async def main() -> None:
                 'descriptionMaxLength': actor_input.get('descriptionMaxLength'),
                 # --- VIN enrichment fields (#19) ---
                 'enrichVIN': enrich_vin,
-                '_vinCache': vin_cache,  # opened named KV store, or None when enrichVIN=false
             },
             priority='spider',
         )

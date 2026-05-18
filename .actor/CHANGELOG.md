@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.2.0 -- 2026-05-18
+
+### Added
+- **`filterByCurrency` input** (boolean, default `false`) -- opt-in post-filter that drops
+  listings whose `currency` field does not match `priceCurrency`. Before this option, the
+  `priceCurrency` value labelled the currency used for `priceFrom`/`priceTo` range values but
+  did not filter which listings were returned (OLX's API applies numeric price ranges regardless
+  of denomination). When `filterByCurrency: true`, listings with a non-empty, non-matching
+  currency are silently skipped; listings with no currency disclosed pass through unchanged.
+  Ignored when `startUrls` is provided (no effect in URL-sourced mode). Dropped listings are
+  counted and logged in the spider's `closed()` hook. Existing behaviour is 100% unchanged
+  when `filterByCurrency` is left at its default `false`.
+  Closes [#14](https://github.com/web-crawling/apify-olx-cars/issues/14).
+
+- **`pageLimit` input** (integer 1-65, default `50`) -- controls the number of listings requested
+  per OLX API call (`limit` parameter). OLX returns at most 65 per page. Increase to 65 to reduce
+  total API requests and run time by approximately 30%; decrease for finer per-page progress logs.
+  Default 50 is unchanged from all prior versions -- existing runs are unaffected.
+
+- **`sliceYearStep` input** (integer 1-50, default `5`) -- controls the width of year bands (in
+  years) generated when auto-slicing broad result sets by year range (active when
+  `maxItems > 1000`). Smaller values create more, narrower bands for densely-listed years;
+  larger values create fewer, coarser bands for a faster run. Default 5 matches the effective
+  density of the v0.x hardcoded bands.
+
+- **`slicePriceStep` input** (integer 1000-500000, default `5000`) -- controls the width of price
+  bands (in the same currency as `priceCurrency`) generated when auto-slicing year-band result
+  sets by price (active when `maxItems > 1000`). Smaller values give finer slices; larger values
+  give fewer API calls. Default 5000 gives approximately 100 bands across 0-500k.
+
+### Notes
+- `pageLimit`, `sliceYearStep`, and `slicePriceStep` are grouped under a new
+  "Advanced -- Slicing (rarely needed)" section in the actor's input form. Default values
+  preserve existing behaviour exactly -- no changes needed for current users.
+- Closes [#16](https://github.com/web-crawling/apify-olx-cars/issues/16).
+
 ## v1.1.0 -- 2026-05-18
 
 ### Added

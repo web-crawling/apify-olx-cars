@@ -117,6 +117,54 @@ PRICE_BANDS = [
 PAGE_LIMIT = 50
 
 # ---------------------------------------------------------------------------
+# Dynamic band helpers (#16)
+# ---------------------------------------------------------------------------
+
+_YEAR_MIN = 1900
+_YEAR_MAX = 2100
+
+
+def _make_year_bands(step: int) -> list[tuple[int | None, int | None]]:
+    """Generate uniform year bands from _YEAR_MIN to _YEAR_MAX.
+
+    Always includes an open-ended head band (None, _YEAR_MIN) and a
+    tail band (_YEAR_MAX, None) to catch pre-_YEAR_MIN and post-_YEAR_MAX
+    listings.
+
+    Example (step=5): [(None,1900),(1900,1905),...,(2095,2100),(2100,None)]
+    """
+    bands: list[tuple[int | None, int | None]] = [(None, _YEAR_MIN)]
+    lo = _YEAR_MIN
+    while lo < _YEAR_MAX:
+        hi = min(lo + step, _YEAR_MAX)
+        bands.append((lo, hi))
+        lo = hi
+    bands.append((_YEAR_MAX, None))
+    return bands
+
+
+_PRICE_MAX_EUR = 500_000  # open upper band starts here
+
+
+def _make_price_bands(step: int) -> list[tuple[int | None, int | None]]:
+    """Generate uniform price bands from 0 to _PRICE_MAX_EUR.
+
+    Always includes an open upper band (_PRICE_MAX_EUR, None) for
+    ultra-premium listings.
+
+    Example (step=10000): [(0,10000),(10000,20000),...,(490000,500000),(500000,None)]
+    """
+    bands: list[tuple[int | None, int | None]] = []
+    lo = 0
+    while lo < _PRICE_MAX_EUR:
+        hi = lo + step
+        bands.append((lo, hi))
+        lo = hi
+    bands.append((_PRICE_MAX_EUR, None))
+    return bands
+
+
+# ---------------------------------------------------------------------------
 # VIN enrichment helpers (#19)
 # ---------------------------------------------------------------------------
 
@@ -335,6 +383,12 @@ class OlxCarsSpider(scrapy.Spider):
         seller_type: str = str(input_data.get('sellerType') or 'any').lower().strip()
         sort_by: str = str(input_data.get('sortBy') or 'created_at:desc')
         max_items: int = int(input_data.get('maxItems') or 1000)
+        # --- Currency post-filter (#14) ---
+        filter_by_currency: bool = bool(input_data.get('filterByCurrency', False))
+        # --- Advanced slicing params (#16) ---
+        page_limit: int = int(input_data.get('pageLimit') or 50)
+        slice_year_step: int = int(input_data.get('sliceYearStep') or 5)
+        slice_price_step: int = int(input_data.get('slicePriceStep') or 5000)
 
         # Validate country
         if country not in COUNTRY_DOMAIN:
@@ -364,12 +418,28 @@ class OlxCarsSpider(scrapy.Spider):
         # Stash common kwargs for callbacks
         self._max_items = max_items
         self._sort_by = sort_by
+        # Currency post-filter (#14)
+        self._filter_by_currency = filter_by_currency
+        self._price_currency = price_currency
+        self._currency_filtered_count = 0
+        # Whether spider entered via startUrls mode (used to suppress structured filters)
+        self._start_urls_mode: bool = bool(start_urls_raw)
+        # Advanced slicing params (#16)
+        self._page_limit = page_limit
+        self._slice_year_step = slice_year_step
+        self._slice_price_step = slice_price_step
 
         # -------------------------------------------------------------------
         # Mode A: startUrls
         # -------------------------------------------------------------------
         if start_urls:
             logger.info('startUrls mode: %d URLs provided.', len(start_urls))
+            if filter_by_currency:
+                logger.info(
+                    'filterByCurrency=True is ignored in startUrls mode. '
+                    'priceCurrency=%s has no effect on URL-sourced requests.',
+                    price_currency,
+                )
             for url in start_urls:
                 detected_country = _detect_country_from_url(url)
                 if detected_country is None:
@@ -553,7 +623,7 @@ class OlxCarsSpider(scrapy.Spider):
         """Yield the first paginated API request for a given slice."""
         params: dict[str, Any] = {
             'category_id': category_id,
-            'limit': PAGE_LIMIT,
+            'limit': self._page_limit,
             'offset': offset,
             'sort_by': sort_by,
             **base_params,
@@ -700,6 +770,17 @@ class OlxCarsSpider(scrapy.Spider):
                 cat_l2_name=cat_l2_name,
                 scraped_at=scraped_at,
             )
+
+            # --- priceCurrency post-filter (#14) ---
+            # Filter AFTER _make_item() so item['currency'] is populated.
+            # Use `continue` (NOT DropItem) to avoid triggering FailOnItemErrorExtension.
+            # Empty-currency items pass through — we never filter what we cannot inspect.
+            if self._filter_by_currency and not self._start_urls_mode:
+                item_currency = item.get('currency') or ''
+                if item_currency and item_currency.upper() != self._price_currency.upper():
+                    self._currency_filtered_count += 1
+                    continue
+
             self._total_yielded += 1
 
             # --- VIN enrichment (#19) ---
@@ -753,7 +834,7 @@ class OlxCarsSpider(scrapy.Spider):
         # ------------------------------------------------------------------
         # Pagination: schedule next page
         # ------------------------------------------------------------------
-        next_offset = offset + PAGE_LIMIT
+        next_offset = offset + self._page_limit
         max_offset = min(total_elements, 1000)
 
         if next_offset > max_offset:
@@ -820,7 +901,8 @@ class OlxCarsSpider(scrapy.Spider):
         parent_slice_label: str,
     ) -> Generator:
         """Yield page requests for each year band sub-slice."""
-        for year_from, year_to in YEAR_BANDS:
+        year_bands = _make_year_bands(self._slice_year_step)
+        for year_from, year_to in year_bands:
             band_params = dict(base_params)
             if year_from is not None:
                 band_params['filter_float_year:from'] = year_from
@@ -849,7 +931,8 @@ class OlxCarsSpider(scrapy.Spider):
         parent_slice_label: str,
     ) -> Generator:
         """Yield page requests for each price band sub-slice (tertiary axis)."""
-        for p_from, p_to in PRICE_BANDS:
+        price_bands = _make_price_bands(self._slice_price_step)
+        for p_from, p_to in price_bands:
             band_params = dict(base_params)
             if p_from is not None:
                 band_params['filter_float_price:from'] = p_from
@@ -1437,6 +1520,14 @@ class OlxCarsSpider(scrapy.Spider):
                 '(enrichment skipped for failed items).',
                 type(self)._vpic_success_count,
                 type(self)._vpic_error_count,
+            )
+
+        # Currency post-filter summary (#14)
+        if getattr(self, '_filter_by_currency', False) and self._currency_filtered_count > 0:
+            logger.info(
+                'filterByCurrency=True: dropped %d listings whose currency did not match '
+                'priceCurrency=%s.',
+                self._currency_filtered_count, self._price_currency,
             )
 
         # Check for cap warnings across all slices

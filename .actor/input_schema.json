@@ -78,7 +78,13 @@
 			"enum": ["EUR", "RON", "PLN", "UAH", "USD", "BGN", "KZT"],
 			"enumTitles": ["EUR — Euro", "RON — Romanian Leu", "PLN — Polish Zloty", "UAH — Ukrainian Hryvnia", "USD — US Dollar", "BGN — Bulgarian Lev", "KZT — Kazakhstani Tenge"],
 			"default": "EUR",
-			"description": "Currency for priceFrom/priceTo filters. Must match the listing currency on OLX for the filter to apply. EUR is the most interoperable choice across all supported countries. Ignored when startUrls is provided."
+			"description": "Currency for priceFrom/priceTo filters. Must match the listing currency on OLX for the filter to apply. EUR is the most interoperable choice across all supported countries. Ignored when startUrls is provided. When filterByCurrency is true, only listings in this currency are returned."
+		},
+		"filterByCurrency": {
+			"title": "Filter by Currency",
+			"type": "boolean",
+			"default": false,
+			"description": "When true, drops listings whose currency does not match priceCurrency. Only effective in structured-filter mode (ignored when startUrls is provided). Leave false (default) to return all listings regardless of listed currency — matching behaviour before this option was added."
 		},
 		"sellerType": {
 			"title": "Seller Type",
@@ -212,6 +218,35 @@
 			"editor": "textfield",
 			"default": "",
 			"description": "Optional URL to POST the digest JSON to at run end. Supports Slack incoming webhooks, Discord webhooks, Make/n8n/Zapier, and any generic HTTP endpoint. NOTE: direct POST to Telegram Bot API is NOT supported — Telegram expects a bespoke {chat_id, text} body that does not match the digest shape; use Zapier/Make as a relay (see README). Leave this URL empty to disable outbound HTTP — the digest is always written to the Apify key-value store (olx-cars-notifications) regardless. Keep this URL private — it is stored in run input and visible in run history."
+		},
+		"pageLimit": {
+			"title": "Page Limit",
+			"type": "integer",
+			"editor": "number",
+			"default": 50,
+			"minimum": 1,
+			"maximum": 65,
+			"description": "Number of listings to request per OLX API call (the 'limit' parameter). OLX returns at most 65 per page. Increase to 65 to reduce total API requests and run time; decrease for finer progress logging. Default 50 is safe across all 6 countries. Only affects request volume — not which listings are returned.",
+			"sectionCaption": "Advanced — Slicing (rarely needed)",
+			"sectionDescription": "Fine-tune how the actor paginates and slices large result sets. Change these only if you understand OLX's 1000-result-per-query cap. Wrong values do not break the actor — they affect efficiency."
+		},
+		"sliceYearStep": {
+			"title": "Year Slice Step",
+			"type": "integer",
+			"editor": "number",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 50,
+			"description": "Width of each year band (in years) when auto-slicing by year for brand/query result sets that exceed 1000 visible listings. Smaller values (e.g. 2) give narrower bands and better coverage for densely-listed years. Larger values (e.g. 10) give fewer API calls. Default 5 covers the 1900–2100 range in 40 bands. Only relevant when maxItems > 1000."
+		},
+		"slicePriceStep": {
+			"title": "Price Slice Step (EUR)",
+			"type": "integer",
+			"editor": "number",
+			"default": 5000,
+			"minimum": 1000,
+			"maximum": 500000,
+			"description": "Width of each price band (in the same currency as priceCurrency) when auto-slicing by price for year-band result sets that still exceed 1000 visible listings. Smaller values (e.g. 2000) give finer slices; larger values (e.g. 25000) give fewer API calls. Default 5000 gives approximately 100 bands across 0–500k but most above 50k will be empty. Only relevant when maxItems > 1000."
 		}
 	}
 }

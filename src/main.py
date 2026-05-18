@@ -172,6 +172,49 @@ async def main() -> None:
         # Lazy-open inside the async spider sidesteps the deepcopy entirely.
         enrich_vin = bool(actor_input.get('enrichVIN', False))
 
+        # --- Advanced slicing fields (#16) ---
+        page_limit_raw = actor_input.get('pageLimit', 50)
+        try:
+            page_limit = int(page_limit_raw)
+            if not (1 <= page_limit <= 65):
+                Actor.log.warning(
+                    'pageLimit %r out of range [1,65] — clamping.', page_limit_raw,
+                )
+                page_limit = max(1, min(65, page_limit))
+        except (TypeError, ValueError):
+            Actor.log.warning(
+                'Invalid pageLimit %r — defaulting to 50.', page_limit_raw,
+            )
+            page_limit = 50
+
+        slice_year_step_raw = actor_input.get('sliceYearStep', 5)
+        try:
+            slice_year_step = int(slice_year_step_raw)
+            if not (1 <= slice_year_step <= 50):
+                Actor.log.warning(
+                    'sliceYearStep %r out of range [1,50] — clamping.', slice_year_step_raw,
+                )
+                slice_year_step = max(1, min(50, slice_year_step))
+        except (TypeError, ValueError):
+            Actor.log.warning(
+                'Invalid sliceYearStep %r — defaulting to 5.', slice_year_step_raw,
+            )
+            slice_year_step = 5
+
+        slice_price_step_raw = actor_input.get('slicePriceStep', 5000)
+        try:
+            slice_price_step = int(slice_price_step_raw)
+            if not (1000 <= slice_price_step <= 500000):
+                Actor.log.warning(
+                    'slicePriceStep %r out of range [1000,500000] — clamping.', slice_price_step_raw,
+                )
+                slice_price_step = max(1000, min(500000, slice_price_step))
+        except (TypeError, ValueError):
+            Actor.log.warning(
+                'Invalid slicePriceStep %r — defaulting to 5000.', slice_price_step_raw,
+            )
+            slice_price_step = 5000
+
         snapshot: dict = {}
         kv_store = None
         if incremental_mode:
@@ -229,6 +272,12 @@ async def main() -> None:
                 'descriptionMaxLength': actor_input.get('descriptionMaxLength'),
                 # --- VIN enrichment fields (#19) ---
                 'enrichVIN': enrich_vin,
+                # --- Currency post-filter (#14) ---
+                'filterByCurrency': bool(actor_input.get('filterByCurrency', False)),
+                # --- Advanced slicing fields (#16) ---
+                'pageLimit': page_limit,
+                'sliceYearStep': slice_year_step,
+                'slicePriceStep': slice_price_step,
             },
             priority='spider',
         )

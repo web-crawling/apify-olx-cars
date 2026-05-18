@@ -225,8 +225,8 @@
 			"editor": "number",
 			"default": 50,
 			"minimum": 1,
-			"maximum": 65,
-			"description": "Number of listings to request per OLX API call (the 'limit' parameter). OLX returns at most 65 per page. Increase to 65 to reduce total API requests and run time; decrease for finer progress logging. Default 50 is safe across all 6 countries. Only affects request volume — not which listings are returned.",
+			"maximum": 50,
+			"description": "Number of listings to request per OLX API call (the 'limit' parameter). OLX's cars endpoint rejects values above 50 with HTTP 400. Lower values produce finer per-page progress logs at the cost of more requests. Default 50 is the maximum and is unchanged from prior versions. Only affects request volume — not which listings are returned.",
 			"sectionCaption": "Advanced — Slicing (rarely needed)",
 			"sectionDescription": "Fine-tune how the actor paginates and slices large result sets. Change these only if you understand OLX's 1000-result-per-query cap. Wrong values do not break the actor — they affect efficiency."
 		},

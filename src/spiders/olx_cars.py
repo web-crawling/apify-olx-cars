@@ -927,6 +927,8 @@ class OlxCarsSpider(scrapy.Spider):
         else:
             loader.add_value('condition', '')
 
+        # conditionRaw is set directly after load_item() — see below.
+
         # ---- Engine capacity (cm³, normalised) ----------------------------
         engine_key = PARAM_KEY_MAP.get('engine_size', {}).get(country)
         engine_raw = None
@@ -1154,6 +1156,19 @@ class OlxCarsSpider(scrapy.Spider):
             item['images'] = []
         if item.get('paramsRaw') is None:
             item['paramsRaw'] = []
+
+        # ---- conditionRaw (bypass the loader for correct type preservation) --
+        # MapCompose(pass_through) + TakeFirst() silently truncates UA
+        # multi-element arrays: MapCompose ITERATES over the list so TakeFirst
+        # returns only the first element, losing any subsequent flags.
+        # Set directly on the item dict after load_item() to preserve the full
+        # value. Always emit as str: UA lists are ';'-joined so that Apify's
+        # schema validator sees a typed string field on every country.
+        if cond_raw is not None:
+            if isinstance(cond_raw, list):
+                item['conditionRaw'] = ';'.join(str(x) for x in cond_raw)
+            else:
+                item['conditionRaw'] = str(cond_raw)
 
         return item
 

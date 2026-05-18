@@ -26,7 +26,7 @@ from scrapy.utils.defer import deferred_to_future
 
 import statistics
 
-from .pipelines import FairPricePipeline, IncrementalDiffPipeline, _drop_nones
+from .pipelines import FairPricePipeline, HistoryFilterPipeline, IncrementalDiffPipeline, _drop_nones
 from .spiders.olx_cars import OlxCarsSpider
 
 
@@ -135,6 +135,9 @@ async def main() -> None:
                 'sellerType': actor_input.get('sellerType', 'any'),
                 'sortBy': sort_by,
                 'maxItems': max_items,
+                # --- History filter fields (#23) ---
+                'excludeDamaged': bool(actor_input.get('excludeDamaged', False)),
+                'firstOwnerOnly': bool(actor_input.get('firstOwnerOnly', False)),
                 # --- Incremental mode fields ---
                 'incrementalMode': incremental_mode,
                 'stateKey': state_key,
@@ -149,6 +152,7 @@ async def main() -> None:
         # --- Reset class-level flags before each run ---
         # (prevents false positives if Actor is somehow re-run in the same process)
         OlxCarsSpider.crawl_failed = False
+        HistoryFilterPipeline.reset()
         IncrementalDiffPipeline.updated_snapshot = {}
         IncrementalDiffPipeline.seen_offer_ids = set()
         IncrementalDiffPipeline.was_truncated = False

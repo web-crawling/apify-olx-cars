@@ -125,6 +125,7 @@ def run_scenario(scenario: dict, out_file: str) -> dict:
     # SDK context), but the buffer is populated and accessible for assertion checks.
     settings.set("ITEM_PIPELINES", {
         "src.pipelines.MaxItemsPipeline": 100,
+        "src.pipelines.HistoryFilterPipeline": 150,
         "src.pipelines.IncrementalDiffPipeline": 200,
         "src.pipelines.DropNonesPipeline": 500,
         "src.pipelines.FairPricePipeline": 600,

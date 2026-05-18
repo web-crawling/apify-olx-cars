@@ -75,6 +75,11 @@ RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429]
 
 ITEM_PIPELINES = {
     'src.pipelines.MaxItemsPipeline': 100,
+    # HistoryFilterPipeline drops damaged/non-first-owner listings before they
+    # touch the incremental snapshot. Must run AFTER MaxItemsPipeline (so the
+    # spider stop-signal fires correctly) and BEFORE IncrementalDiffPipeline
+    # (so filtered items never enter the KV snapshot).
+    'src.pipelines.HistoryFilterPipeline': 150,
     # IncrementalDiffPipeline must run AFTER MaxItemsPipeline (so only items
     # that passed the ceiling are tracked) and BEFORE DropNonesPipeline (so
     # we compare the original item values including Nones, avoiding spurious

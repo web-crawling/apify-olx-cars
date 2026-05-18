@@ -161,3 +161,13 @@ class CarItemLoader(ItemLoader):
     # processors are declared here for completeness and schema alignment.
     priceVsMedianPct_out = TakeFirst()
     priceRating_out = TakeFirst()
+
+    # --- conditionRaw: pre-normalisation condition slug(s) (#23) -----------
+    # The spider calls loader.add_value('conditionRaw', cond_raw) where
+    # cond_raw is either a scalar string (non-UA) or a list[str] (UA).
+    # pass_through input processor prevents the default strip_extra_whitespace
+    # from iterating over list elements or calling .strip() on a list.
+    # conditionRaw is set directly on the item dict in the spider after
+    # loader.load_item() — it bypasses the loader entirely to avoid
+    # MapCompose iterating over UA multi-element arrays and TakeFirst()
+    # silently truncating them. No conditionRaw_in / conditionRaw_out needed.

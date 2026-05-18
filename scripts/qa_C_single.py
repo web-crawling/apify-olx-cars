@@ -44,6 +44,7 @@ settings.set(
     "ITEM_PIPELINES",
     {
         "src.pipelines.MaxItemsPipeline": 100,
+        "src.pipelines.HistoryFilterPipeline": 150,
         "src.pipelines.IncrementalDiffPipeline": 200,
         "src.pipelines.DropNonesPipeline": 500,
         # FairPricePipeline included to match the production pipeline chain.

@@ -40,12 +40,22 @@ def check(label: str, ok: bool, detail: str = ""):
     print(f"[{mark}] {label}{extra}")
 
 
-def make_pipeline(exclude_damaged: bool, first_owner_only: bool) -> HistoryFilterPipeline:
-    """Build a pipeline instance mimicking open_spider behaviour."""
+def make_pipeline(exclude_damaged: bool, first_owner_only: bool,
+                  service_book_only: bool = False) -> HistoryFilterPipeline:
+    """Build a pipeline instance mimicking open_spider behaviour.
+
+    The ``service_book_only`` keyword defaults to False so existing call sites
+    (which test only the first two filters) continue to work, while still
+    initialising the third instance attribute that PR #51 added to the
+    process_item short-circuit guard. Without setting this attribute,
+    process_item raises AttributeError on the first ``or self._service_book_only``
+    evaluation.
+    """
     HistoryFilterPipeline.reset()
     pipeline = HistoryFilterPipeline()
     pipeline._exclude_damaged = exclude_damaged
     pipeline._first_owner_only = first_owner_only
+    pipeline._service_book_only = service_book_only
     return pipeline
 
 

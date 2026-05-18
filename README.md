@@ -51,7 +51,7 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **Automatic slicing past the 1,000-result API cap** -- when `maxItems > 1000`, the actor fans out over brand-level and year-band sub-queries to maximise coverage.
 - **Normalised vehicle specs** -- `fuelType`, `transmission`, `bodyType`, and `condition` are mapped to consistent English enums across all six countries despite regional API vocabulary differences.
 - **Seller type filtering** -- narrow results to private sellers (`sellerType: "private"`) or dealers (`sellerType: "business"`); universal across all six countries.
-- **History condition filters** -- `excludeDamaged` drops accident/damaged listings client-side; `firstOwnerOnly` keeps only first-owner listings. Each filter applies where OLX exposes the relevant flag (see the per-country support matrix in the Input Parameters section); unsupported countries are skipped silently.
+- **History condition filters** -- `excludeDamaged` drops accident/damaged listings client-side; `firstOwnerOnly` keeps only first-owner listings; `serviceBookOnly` (BG-only) keeps only listings with a stamped service book. Each filter applies where OLX exposes the relevant flag (see the per-country support matrix in the Input Parameters section); unsupported countries are skipped silently.
 - **Within-run fair-price rating** -- `priceVsMedianPct` and `priceRating` computed from the listings in each run; useful when running broad queries where enough comparable listings form a bucket.
 - **Country-specific attributes pass-through** -- `extraAttributes` exposes all OLX `params[]` fields not already in top-level output, including door count, engine power, body sub-type, and other locale-specific values.
 - **44 always-on top-level fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through. Four additional conditionally-present fields (`extraAttributes`, `priceVsMedianPct`, `priceRating`, `conditionRaw`) are included when applicable.
@@ -195,6 +195,7 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 | `sellerType` | enum | NO | `"any"` | Filter listings by seller type: `"any"` (default, no filter), `"private"` (private sellers only), `"business"` (dealers/businesses only). Applies in both structured-filter and `startUrls` modes. In `startUrls` mode, an existing `filter_enum_business` value in the URL takes precedence and `sellerType` has no effect. |
 | `excludeDamaged` | boolean | NO | `false` | Drop listings flagged as damaged or needs-repairs. Applies on RO/PL/PT/UA/KZ; ignored on BG (no API signal). See the History filter support matrix below. |
 | `firstOwnerOnly` | boolean | NO | `false` | Keep only listings flagged as first owner. Applies on BG/UA/KZ; ignored on RO/PL/PT (no API signal). See the History filter support matrix below. |
+| `serviceBookOnly` | boolean | NO | `false` | Keep only listings with a stamped service book. Applies on BG; ignored on RO/PL/PT/UA/KZ (no API signal). See the History filter support matrix below. |
 | `sortBy` | enum | NO | `"created_at:desc"` | `created_at:desc, filter_float_price:asc, filter_float_price:desc, relevance` |
 | `maxItems` | integer | NO | `1000` | Hard ceiling. OLX caps single queries at 1,000; `> 1000` triggers auto brand x year x price slicing |
 | `incrementalMode` | boolean | NO | `false` | Enable change tracking across runs. See Incremental Monitoring section. |
@@ -212,10 +213,11 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 |---|---|---|---|---|---|---|
 | `excludeDamaged` | ✅ | ✅ | ⚠️ no signal | ✅ | ✅ | ✅ |
 | `firstOwnerOnly` | ❌ no signal | ❌ no signal | ✅ | ❌ no signal | ✅ | ✅ via `ownersCount` |
+| `serviceBookOnly` | ❌ no signal | ❌ no signal | ✅ | ❌ no signal | ❌ no signal | ❌ no signal |
 
 Cells marked ❌ or ⚠️ mean OLX does not expose the relevant flag on that country's API. When you set such a filter for an unsupported country, the actor logs an INFO line once per run and the filter is silently skipped — no listings are dropped and no error is raised. Runs proceed normally.
 
-`serviceBookOnly` is tracked in [#51](https://github.com/web-crawling/apify-olx-cars/issues/51) as a future addition (currently confirmed on olx.bg only; deferred until OLX exposes the signal on more countries).
+**Intersection trap on BG:** Bulgarian listings carry exactly one `technical_condition` value per offer (e.g. `"service-book"`, `"first-owner"`, `"technically-upright"`, etc. — never multiple at once). Combining `serviceBookOnly: true` with `firstOwnerOnly: true` on BG therefore demands both slugs on the same listing, which almost no offer satisfies — the run will return near-zero items. If you want first-owner-OR-service-book coverage on BG, run the actor twice (once with each filter) and union the results.
 
 ## Output Data
 
@@ -618,7 +620,7 @@ If you need a heuristic body-type classification for BG listings, read the `para
 
 **Fair-price rating coverage depends on listing density.** The `priceVsMedianPct` and `priceRating` fields are computed within each run by bucketing listings on make, model, 5-year year-band, 50,000 km mileage-band, and currency. A bucket must contain at least 5 listings before any item in it receives a rating. In typical single-country single-brand runs, ~40 % of items receive a rating; broader runs (parent cars category, multi-brand) push this higher. Niche models, rare brands on small markets, or runs with fewer than ~20–30 total items may still return few or no rated items. The rating reflects current within-run prices only, not a historical OLX market median.
 
-**History filters drop items client-side and may produce fewer than `maxItems` items.** The `excludeDamaged` and `firstOwnerOnly` filters work by inspecting each listing's raw condition slug after fetching from OLX (no API-level filter is available). Listings are dropped at pipeline priority 150, which fires AFTER the `maxItems` cap at priority 100. As a result, a run with `maxItems: 100` plus `excludeDamaged: true` may yield fewer than 100 output items if some fetched listings were filtered out. To compensate, increase `maxItems` by ~10–30% over your target sample size when using these filters. For example: set `maxItems: 130` to typically land near 100 output items when around 20–25% of listings in your query are damaged.
+**History filters drop items client-side and may produce fewer than `maxItems` items.** The `excludeDamaged`, `firstOwnerOnly`, and `serviceBookOnly` filters work by inspecting each listing's raw condition slug after fetching from OLX (no API-level filter is available). Listings are dropped at pipeline priority 150, which fires AFTER the `maxItems` cap at priority 100. As a result, a run with `maxItems: 100` plus any of these filters may yield fewer than 100 output items if some fetched listings were filtered out. To compensate, increase `maxItems` by ~10–30% over your target sample size when using these filters. For example: set `maxItems: 130` to typically land near 100 output items when around 20–25% of listings in your query are damaged.
 
 **`MISSING` incremental items do not receive fair-price fields.** When `emitMissing: true`, items emitted with `changeType: MISSING` come from the prior-run snapshot and may have stale prices. `priceVsMedianPct` and `priceRating` are intentionally absent for MISSING items to avoid comparing stale snapshot prices against the current run's median.
 
@@ -670,11 +672,14 @@ The actor returns 40-65 listings per API call. Concurrency per domain ranges fro
 **Why was Romania chosen as the default country?**
 Romania has the highest car-listing volume among the supported countries (approximately 128,000 active listings) and EUR pricing is common in RO, which makes it easy to compare prices across European markets without currency conversion. `"ro"` as the default also means the quickest path to a working first run for most users.
 
-**Why am I getting fewer items than `maxItems` when I use `excludeDamaged` or `firstOwnerOnly`?**
-These filters are client-side post-filters -- they drop items after the `maxItems` cap is enforced. If you ask for 100 items and 20% are damaged, you will receive approximately 80 output items. Increase `maxItems` to compensate, for example set `maxItems: 130` to typically land near 100 items after filtering. The actor does not raise an error in this situation; it simply outputs fewer items than requested.
+**Why am I getting fewer items than `maxItems` when I use `excludeDamaged`, `firstOwnerOnly`, or `serviceBookOnly`?**
+These filters are client-side post-filters -- they drop items after the `maxItems` cap is enforced. If you ask for 100 items and 20% are damaged (or non-first-owner, or lack a service book), you will receive approximately 80 output items. Increase `maxItems` to compensate, for example set `maxItems: 130` to typically land near 100 items after filtering. The actor does not raise an error in this situation; it simply outputs fewer items than requested.
 
 **Why does `firstOwnerOnly` only work on some countries?**
 OLX exposes a first-owner flag on three of the six supported countries (BG, UA, KZ). The other three (RO, PL, PT) do not surface ownership history in their API responses. When you set `firstOwnerOnly: true` for an unsupported country, the actor logs an INFO message once per run and proceeds without filtering -- no listings are dropped and the run succeeds normally. See the History filter support matrix in the Input Parameters section for the full breakdown.
+
+**Why does `serviceBookOnly` only work on Bulgaria?**
+OLX exposes a `service-book` condition flag exclusively on olx.bg (in the `technical_condition` field). The other five supported countries (RO, PL, PT, UA, KZ) do not surface a service-book attribute in their OLX `params[]` response. When you set `serviceBookOnly: true` for an unsupported country, the actor logs an INFO message once per run and proceeds without filtering -- no listings are dropped and the run succeeds normally.
 
 **Why are `priceVsMedianPct` and `priceRating` absent from my output?**
 These fields require at least 5 listings in the same bucket (same make, model, 5-year year-band, 50,000 km mileage-band, and currency) within a single run. As of v0.6.0, typical single-country single-brand runs (e.g. BMW in Romania or Poland) rate roughly 40 % of items; broader runs (omit the `brands` filter or include multiple brands) push this higher. Very narrow queries -- a single niche model, a rare brand on a small market, or runs with fewer than ~20–30 total items -- may still return few or no rated items. The fields are also absent for `MISSING` incremental items and for listings where price is undisclosed.

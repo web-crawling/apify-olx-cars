@@ -5,11 +5,12 @@ Pipelines:
     Raises CloseSpider when the limit is reached, which signals Scrapy to
     shut down cleanly and lets Apify report SUCCEEDED with the items collected.
 
-  HistoryFilterPipeline — client-side post-filter for excludeDamaged and
-    firstOwnerOnly inputs. Runs at priority 150 (after MaxItemsPipeline at 100,
-    before IncrementalDiffPipeline at 200). Raises DropItem for filtered listings
-    so they never enter the incremental snapshot. On countries where a filter
-    has no API signal, emits a one-time INFO log per (filter, country) pair.
+  HistoryFilterPipeline — client-side post-filter implementing three filter
+    checks: excludeDamaged, firstOwnerOnly, and serviceBookOnly. Runs at
+    priority 150 (after MaxItemsPipeline at 100, before IncrementalDiffPipeline
+    at 200). Raises DropItem for filtered listings so they never enter the
+    incremental snapshot. On countries where a filter has no API signal, emits
+    a one-time INFO log per (filter, country) pair.
 
   IncrementalDiffPipeline — diffs each item against the KV snapshot loaded
     by main.py, attaches changeType/firstSeenAt/lastSeenAt, deduplicates
@@ -67,7 +68,7 @@ class MaxItemsPipeline:
 
 
 class HistoryFilterPipeline:
-    """Client-side post-filter for excludeDamaged and firstOwnerOnly inputs.
+    """Client-side post-filter for excludeDamaged, firstOwnerOnly, and serviceBookOnly inputs.
 
     Pipeline priority: 150 — after MaxItemsPipeline (100), before
     IncrementalDiffPipeline (200). Filtered items are DropItem'd so they
@@ -81,12 +82,16 @@ class HistoryFilterPipeline:
     Per-country support:
       excludeDamaged: ro, pl, pt, ua, kz — uses normalised item['condition']
       firstOwnerOnly: bg, ua, kz — uses conditionRaw (bg/ua) or ownersCount (kz)
+      serviceBookOnly: bg — uses conditionRaw (exact 'service-book' slug match)
       BG is excluded from excludeDamaged (no damage flag in BG condition enum).
+      RO/PL/PT/UA/KZ are excluded from serviceBookOnly (no service-book slug
+      observed in the params[] enum across the 10-offer probe sample).
     """
 
     # Per-filter supported country sets (client-side signal confirmed)
     _DAMAGED_COUNTRIES: frozenset = frozenset({'ro', 'pl', 'pt', 'ua', 'kz'})
     _FIRST_OWNER_COUNTRIES: frozenset = frozenset({'bg', 'ua', 'kz'})
+    _SERVICE_BOOK_COUNTRIES: frozenset = frozenset({'bg'})
 
     # Class-level set of (filter_name, country) cells already logged as inapplicable.
     # Class attribute (not instance) so main.py can reset it before each run.
@@ -102,14 +107,15 @@ class HistoryFilterPipeline:
         input_data = spider.settings.get('INPUT_DATA') or {}
         self._exclude_damaged: bool = bool(input_data.get('excludeDamaged', False))
         self._first_owner_only: bool = bool(input_data.get('firstOwnerOnly', False))
-        if self._exclude_damaged or self._first_owner_only:
+        self._service_book_only: bool = bool(input_data.get('serviceBookOnly', False))
+        if self._exclude_damaged or self._first_owner_only or self._service_book_only:
             logger.info(
-                'HistoryFilterPipeline: excludeDamaged=%s firstOwnerOnly=%s',
-                self._exclude_damaged, self._first_owner_only,
+                'HistoryFilterPipeline: excludeDamaged=%s firstOwnerOnly=%s serviceBookOnly=%s',
+                self._exclude_damaged, self._first_owner_only, self._service_book_only,
             )
 
     def process_item(self, item, spider):
-        if not (self._exclude_damaged or self._first_owner_only):
+        if not (self._exclude_damaged or self._first_owner_only or self._service_book_only):
             return item
 
         d = item if isinstance(item, dict) else ItemAdapter(item).asdict()
@@ -130,6 +136,14 @@ class HistoryFilterPipeline:
                     raise DropItem(f'HistoryFilter: firstOwnerOnly — offerId {d.get("offerId")}')
             else:
                 self._log_once(spider, 'firstOwnerOnly', country)
+
+        # --- serviceBookOnly --------------------------------------------------
+        if self._service_book_only:
+            if country in self._SERVICE_BOOK_COUNTRIES:
+                if not self._has_service_book(d):
+                    raise DropItem(f'HistoryFilter: serviceBookOnly — offerId {d.get("offerId")}')
+            else:
+                self._log_once(spider, 'serviceBookOnly', country)
 
         return item
 
@@ -167,6 +181,26 @@ class HistoryFilterPipeline:
         # Split on ';' to handle UA joined arrays; non-UA values won't contain ';'
         parts = {p.strip() for p in cr.split(';')}
         return 'first-owner' in parts
+
+    @staticmethod
+    def _has_service_book(d: dict) -> bool:
+        """Return True when the BG listing's conditionRaw contains 'service-book'.
+
+        BG only — caller must have already gated on country == 'bg'.
+        conditionRaw is always a str at this point (spider emits scalar BG
+        values directly; UA arrays are ';'-joined but UA is not in
+        _SERVICE_BOOK_COUNTRIES so this method never sees a joined UA string).
+        Missing conditionRaw: pass through (false-negative-keep over
+        false-positive-drop). Match is exact-slug, not substring — prevents
+        spurious matches on hypothetical compound keys like 'with-service-book'.
+        """
+        cr = d.get('conditionRaw')
+        if cr is None:
+            return True  # unknown → pass through
+        if not isinstance(cr, str):
+            return True  # defensive — should not happen
+        parts = {p.strip() for p in cr.split(';')}
+        return 'service-book' in parts
 
     @classmethod
     def _log_once(cls, spider, filter_name: str, country: str) -> None:

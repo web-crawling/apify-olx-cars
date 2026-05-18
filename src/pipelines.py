@@ -161,8 +161,9 @@ class HistoryFilterPipeline:
             # No condition data: unknown — pass through rather than false-positive drop
             return True
         if not isinstance(cr, str):
-            # Defensive — should not happen with current spider, but pass through
-            return False
+            # Defensive — should not happen with current spider; pass through (True)
+            # to match the cr-is-None branch (prefer false-negative-keep over false-positive-drop)
+            return True
         # Split on ';' to handle UA joined arrays; non-UA values won't contain ';'
         parts = {p.strip() for p in cr.split(';')}
         return 'first-owner' in parts

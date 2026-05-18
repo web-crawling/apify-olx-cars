@@ -93,4 +93,4 @@ class CarItem(scrapy.Item):
     priceRating = scrapy.Field()         # str|None: very_good/good/fair/high/very_high; TakeFirst()
 
     # --- Raw condition slug(s) before normalisation (#23) ---------------------
-    conditionRaw = scrapy.Field()  # str | list[str] | None; Identity() output processor
+    conditionRaw = scrapy.Field()  # str | None; set directly on item in spider, loader bypassed (UA arrays are ';'-joined)

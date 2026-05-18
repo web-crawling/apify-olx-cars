@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.8.0 — 2026-05-18
+
+### Added
+- **`serviceBookOnly` input** (boolean, default `false`) — keeps only listings with a
+  stamped service book. Applies on Bulgaria (olx.bg) where OLX surfaces `service-book`
+  in the `technical_condition` param. The filter inspects the raw OLX condition slug
+  via the existing `conditionRaw` output field (set membership after `;`-split, exact
+  slug match — substring matches are explicitly rejected). Listings on RO/PL/PT/UA/KZ
+  pass through unchanged (no API signal) with a one-time INFO log per run. Closes
+  [#51](https://github.com/web-crawling/apify-olx-cars/issues/51).
+
+### Notes
+- Filter runs client-side at pipeline priority 150 (same priority as `excludeDamaged`
+  and `firstOwnerOnly`), so the `maxItems` cap (priority 100) is enforced BEFORE the
+  filter. Runs with `serviceBookOnly: true` may yield fewer items than `maxItems`
+  requests — increase `maxItems` by ~10–30 % to compensate.
+- Combining `serviceBookOnly: true` with `firstOwnerOnly: true` on BG returns near-zero
+  results: BG listings carry exactly one `technical_condition` value per offer, so
+  almost no offer satisfies both filters at once. Run twice (once with each filter)
+  and union the results if you need both populations.
+- No new output field — reuses `conditionRaw` (shipped in v0.7.0).
+
 ## v0.7.0 — 2026-05-18
 
 ### Added

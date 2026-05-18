@@ -261,7 +261,7 @@ def check_slug_vocabulary(
         }
         if non_canonical:
             print(f"\n  !! SLUG VOCABULARY VIOLATION in {country_code.upper()}_COLOR_MAP:")
-            for uid, slug in sorted(non_canonical, key=lambda x: int(x[0])):
+            for uid, slug in sorted(non_canonical, key=lambda pair: _sort_key_mixed(pair[0])):
                 print(f"    id={uid}  slug={slug!r}  -- NOT in canonical vocabulary")
             all_ok = False
     if all_ok:

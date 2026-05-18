@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.2.0 -- 2026-05-18
+
+### Added
+- **`filterByCurrency` input** (boolean, default `false`) -- opt-in post-filter that drops
+  listings whose `currency` does not match `priceCurrency`. Without this flag, OLX's price
+  range filters operate on raw numeric values regardless of currency, so users targeting
+  EUR results on non-EUR countries could receive mixed-currency listings. No effect when
+  `startUrls` is provided. Default `false` preserves existing behaviour exactly.
+  Closes [#14](https://github.com/web-crawling/apify-olx-cars/issues/14).
+
+- **`pageLimit` input** (integer 1-65, default `50`) -- listings requested per OLX API call.
+  Raise to 65 to cut API request count by ~30% at the same `maxItems`. Default 50 is unchanged.
+
+- **`sliceYearStep` input** (integer 1-50, default `5`) -- year-band width when auto-slicing
+  broad result sets (only active when `maxItems > 1000`). Smaller = more, narrower slices.
+
+- **`slicePriceStep` input** (integer 1000-500000, default `5000`) -- price-band width in
+  the same currency as `priceCurrency` when auto-slicing (only active when `maxItems > 1000`).
+  Smaller = finer slices.
+
+### Notes
+- `pageLimit`, `sliceYearStep`, and `slicePriceStep` are grouped under a new
+  "Advanced -- Slicing (rarely needed)" section in the actor's input form. Default values
+  preserve existing behaviour exactly -- no changes needed for current users.
+- Closes [#16](https://github.com/web-crawling/apify-olx-cars/issues/16).
+
 ## v1.1.0 -- 2026-05-18
 
 ### Added

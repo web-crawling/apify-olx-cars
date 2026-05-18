@@ -72,8 +72,14 @@ class FakeSettings(dict):
         return super().get(key, default)
 
 
+class FakeCrawler:
+    """Minimal crawler stub for from_crawler (pipeline reads crawler.settings)."""
+    def __init__(self, input_data: dict):
+        self.settings = FakeSettings(INPUT_DATA=input_data)
+
+
 class FakeSpider:
-    """Minimal spider stub — pipeline only reads spider.settings."""
+    """Minimal spider stub — kept for close_spider calls."""
     def __init__(self, input_data: dict):
         self.settings = FakeSettings(INPUT_DATA=input_data)
         self.crawl_failed = False
@@ -132,15 +138,14 @@ def run_pipeline(
     }
     spider = FakeSpider(input_data)
 
-    diff_pipeline = IncrementalDiffPipeline()
-    diff_pipeline.open_spider(spider)
+    diff_pipeline = IncrementalDiffPipeline.from_crawler(FakeCrawler(input_data))
 
     drop_pipeline = DropNonesPipeline()
 
     try:
-        result = diff_pipeline.process_item(item, spider)
+        result = diff_pipeline.process_item(item)
         # Apply DropNonesPipeline to mirror production chain
-        result = drop_pipeline.process_item(result, spider)
+        result = drop_pipeline.process_item(result)
     except DropItem:
         result = None
 

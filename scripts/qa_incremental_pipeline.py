@@ -63,8 +63,15 @@ class MockSettings:
         return self._data.get(key, default)
 
 
+class MockCrawler:
+    """Minimal crawler stand-in with settings attribute (for from_crawler)."""
+
+    def __init__(self, input_data: dict):
+        self.settings = MockSettings(input_data)
+
+
 class MockSpider:
-    """Minimal spider stand-in with settings + logger."""
+    """Minimal spider stand-in with settings + logger (kept for close_spider calls)."""
 
     def __init__(self, input_data: dict):
         self.settings = MockSettings(input_data)
@@ -91,10 +98,10 @@ def make_car_item(**kwargs) -> CarItem:
     return item
 
 
-def run_pipeline_item(pipeline: IncrementalDiffPipeline, item, spider: MockSpider):
+def run_pipeline_item(pipeline: IncrementalDiffPipeline, item):
     """Call process_item; return (result_item, raised_DropItem_or_None)."""
     try:
-        result = pipeline.process_item(item, spider)
+        result = pipeline.process_item(item)
         return result, None
     except DropItem as e:
         return None, e
@@ -113,11 +120,10 @@ input_data_passthrough = {
     '_runTs': RUN_TS,
 }
 spider1 = MockSpider(input_data_passthrough)
-pipeline1 = IncrementalDiffPipeline()
-pipeline1.open_spider(spider1)
+pipeline1 = IncrementalDiffPipeline.from_crawler(MockCrawler(input_data_passthrough))
 
 item_pt = make_car_item(offerId=11111, price=10000, currency='EUR', title='VW Golf')
-result_pt, drop_pt = run_pipeline_item(pipeline1, item_pt, spider1)
+result_pt, drop_pt = run_pipeline_item(pipeline1, item_pt)
 
 check('passthrough.item_returned', result_pt is not None)
 check('passthrough.no_drop', drop_pt is None)
@@ -145,16 +151,15 @@ input_data_cold = {
     '_runTs': RUN_TS,
 }
 spider2 = MockSpider(input_data_cold)
-pipeline2 = IncrementalDiffPipeline()
-pipeline2.open_spider(spider2)
+pipeline2 = IncrementalDiffPipeline.from_crawler(MockCrawler(input_data_cold))
 
 item_new1 = make_car_item(offerId=10001, price=15000, currency='EUR',
                            title='BMW 320d', condition='used', mileageKm=87000)
 item_new2 = make_car_item(offerId=10002, price=8000, currency='RON',
                            title='VW Polo', condition='used', mileageKm=120000)
 
-result_n1, drop_n1 = run_pipeline_item(pipeline2, item_new1, spider2)
-result_n2, drop_n2 = run_pipeline_item(pipeline2, item_new2, spider2)
+result_n1, drop_n1 = run_pipeline_item(pipeline2, item_new1)
+result_n2, drop_n2 = run_pipeline_item(pipeline2, item_new2)
 
 # Cold start: NEW items are SILENTLY DROPPED (baseline build).
 # The snapshot still accumulates so the next run has state to diff against.
@@ -199,12 +204,11 @@ input_data_unchanged_drop = {
     '_runTs': RUN_TS2,
 }
 spider2b = MockSpider(input_data_unchanged_drop)
-pipeline2b = IncrementalDiffPipeline()
-pipeline2b.open_spider(spider2b)
+pipeline2b = IncrementalDiffPipeline.from_crawler(MockCrawler(input_data_unchanged_drop))
 
 item_unchanged = make_car_item(offerId=10001, price=15000, currency='EUR',
                                 title='BMW 320d', condition='used', mileageKm=87000)
-result_unch, drop_unch = run_pipeline_item(pipeline2b, item_unchanged, spider2b)
+result_unch, drop_unch = run_pipeline_item(pipeline2b, item_unchanged)
 
 check('cold_start.unchanged_dropped', result_unch is None,
       'UNCHANGED item should be DropItem when emitUnchanged=False')
@@ -239,8 +243,7 @@ input_data_s3 = {
     '_runTs': RUN_TS2,
 }
 spider3 = MockSpider(input_data_s3)
-pipeline3 = IncrementalDiffPipeline()
-pipeline3.open_spider(spider3)
+pipeline3 = IncrementalDiffPipeline.from_crawler(MockCrawler(input_data_s3))
 
 # UNCHANGED: same fields as snapshot
 item_unch3 = make_car_item(offerId=20001, price=20000, currency='EUR',
@@ -252,9 +255,9 @@ item_upd3 = make_car_item(offerId=20002, price=4800, currency='RON',
 item_new3 = make_car_item(offerId=20003, price=12000, currency='EUR',
                            condition='new', mileageKm=1000, title='Skoda Octavia')
 
-result_unch3, drop_unch3 = run_pipeline_item(pipeline3, item_unch3, spider3)
-result_upd3, drop_upd3 = run_pipeline_item(pipeline3, item_upd3, spider3)
-result_new3, drop_new3 = run_pipeline_item(pipeline3, item_new3, spider3)
+result_unch3, drop_unch3 = run_pipeline_item(pipeline3, item_unch3)
+result_upd3, drop_upd3 = run_pipeline_item(pipeline3, item_upd3)
+result_new3, drop_new3 = run_pipeline_item(pipeline3, item_new3)
 
 # UNCHANGED should pass through (emitUnchanged=True)
 check('mixed.unchanged_passed', result_unch3 is not None, f'drop={drop_unch3}')
@@ -324,15 +327,14 @@ input_data_s4 = {
     '_runTs': RUN_TS,
 }
 spider4 = MockSpider(input_data_s4)
-pipeline4 = IncrementalDiffPipeline()
-pipeline4.open_spider(spider4)
+pipeline4 = IncrementalDiffPipeline.from_crawler(MockCrawler(input_data_s4))
 
 # Feed same offerId twice
 item_dup1 = make_car_item(offerId=30001, price=9000, currency='EUR', title='Ford Focus')
 item_dup2 = make_car_item(offerId=30001, price=9000, currency='EUR', title='Ford Focus')
 
-result_dup1, drop_dup1 = run_pipeline_item(pipeline4, item_dup1, spider4)
-result_dup2, drop_dup2 = run_pipeline_item(pipeline4, item_dup2, spider4)
+result_dup1, drop_dup1 = run_pipeline_item(pipeline4, item_dup1)
+result_dup2, drop_dup2 = run_pipeline_item(pipeline4, item_dup2)
 
 check('dedup.first_item_passed', result_dup1 is not None, f'drop={drop_dup1}')
 check('dedup.second_item_dropped', result_dup2 is None, 'second occurrence should be DropItem')
@@ -368,14 +370,13 @@ input_data_s5 = {
     '_runTs': RUN_TS2,
 }
 spider5 = MockSpider(input_data_s5)
-pipeline5 = IncrementalDiffPipeline()
-pipeline5.open_spider(spider5)
+pipeline5 = IncrementalDiffPipeline.from_crawler(MockCrawler(input_data_s5))
 
 # Feed exactly maxItems=3 NEW items (all new offerIds → distinct from snapshot)
 for i in range(3):
     new_item = make_car_item(offerId=40000 + i, price=1000 * (i + 1),
                               currency='EUR', title=f'New Car {i}')
-    run_pipeline_item(pipeline5, new_item, spider5)
+    run_pipeline_item(pipeline5, new_item)
 
 # Close spider — should set was_truncated = True (seen 3 >= maxItems 3)
 pipeline5.close_spider(spider5)

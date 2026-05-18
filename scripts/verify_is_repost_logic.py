@@ -62,13 +62,25 @@ def check(label, actual, expected):
         failures.append(label)
 
 
+class MockCrawlerSettings:
+    """Minimal settings shim for from_crawler (accepts get() calls)."""
+    def __init__(self, input_data):
+        self._data = {'INPUT_DATA': input_data}
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+
+class MockCrawler:
+    def __init__(self, input_data):
+        self.settings = MockCrawlerSettings(input_data)
+
+
 def make_pipeline(incremental=True, snapshot=None):
-    """Return an IncrementalDiffPipeline wired with a fake spider settings."""
+    """Return an IncrementalDiffPipeline wired via from_crawler."""
     if snapshot is None:
         snapshot = {}
-    pipeline = IncrementalDiffPipeline()
-    spider = MagicMock()
-    spider.settings.get.return_value = {
+    input_data = {
         'incrementalMode': incremental,
         'emitUnchanged': True,
         'emitMissing': True,
@@ -76,7 +88,9 @@ def make_pipeline(incremental=True, snapshot=None):
         '_snapshot': snapshot,
         '_runTs': '2026-05-16T00:00:00+00:00',
     }
-    pipeline.open_spider(spider)
+    pipeline = IncrementalDiffPipeline.from_crawler(MockCrawler(input_data))
+    # Provide a spider stub for close_spider (which still takes spider arg)
+    spider = MagicMock()
     return pipeline, spider
 
 
@@ -84,17 +98,6 @@ def run_item(pipeline, spider, offer_id, change_type, snapshot_entry=None):
     """Push one CarItem through the pipeline and return result."""
     # Reset seen_ids so each call is treated fresh within a test
     type(pipeline).seen_offer_ids = set()
-    item = CarItem()
-    item['offerId'] = offer_id
-    item['price'] = 10000
-    item['currency'] = 'EUR'
-    # _change_type is a test-only key read by stub_state.compute_diff
-    # We need to pass it through ItemAdapter — store as a real field by adding it
-    # to the snapshot instead, and rely on stub_state using item_dict.get
-    # Actually: CarItem doesn't have _change_type field. We control the output
-    # by pre-populating the snapshot with the right entry type. For REAPPEARED
-    # the snapshot entry needs _missingCount > 0, but our stub just reads
-    # item_dict.get('_change_type'). We must use a dict item instead.
     item_dict = {
         'offerId': offer_id,
         'price': 10000,
@@ -102,7 +105,7 @@ def run_item(pipeline, spider, offer_id, change_type, snapshot_entry=None):
         '_change_type': change_type,
     }
     # Use a plain dict — IncrementalDiffPipeline uses ItemAdapter which handles dicts
-    result = pipeline.process_item(item_dict, spider)
+    result = pipeline.process_item(item_dict)
     return result
 
 
@@ -144,7 +147,7 @@ print('\nTest 2: isRepost absent when incrementalMode=False')
 pipeline_noinc, spider_noinc = make_pipeline(incremental=False)
 type(pipeline_noinc).seen_offer_ids = set()
 item_noinc = {'offerId': 'offer_plain', 'price': 5000, 'currency': 'RON'}
-result_noinc = pipeline_noinc.process_item(item_noinc, spider_noinc)
+result_noinc = pipeline_noinc.process_item(item_noinc)
 check('isRepost absent when incrementalMode=False', 'isRepost' in result_noinc, False)
 
 
@@ -173,7 +176,6 @@ check('MISSING item changeType=MISSING', missing_item['changeType'], 'MISSING')
 print('\nTest 4: DropNonesPipeline keeps isRepost=False (False is not None)')
 
 drop_pipeline = DropNonesPipeline()
-spider_drop = MagicMock()
 
 item_with_none = {
     'offerId': 'offer_drop',
@@ -182,7 +184,7 @@ item_with_none = {
     'isRepost': False,     # must survive — False is not None
     'changeType': 'NEW',
 }
-result_drop = drop_pipeline.process_item(item_with_none, spider_drop)
+result_drop = drop_pipeline.process_item(item_with_none)
 
 check('isRepost=False survives DropNonesPipeline', result_drop.get('isRepost'), False)
 check('price=None stripped by DropNonesPipeline', 'price' in result_drop, False)

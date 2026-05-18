@@ -114,20 +114,48 @@ def item(
     return d
 
 
-def expect_pass(pipeline, it, spider, label):
+def expect_pass(pipeline, it, label):
     try:
-        result = pipeline.process_item(it, spider)
+        result = pipeline.process_item(it)
         check(label, result is not None, 'item returned (not dropped)')
     except DropItem as e:
         check(label, False, f'unexpected DropItem raised: {e}')
 
 
-def expect_drop(pipeline, it, spider, label):
+def expect_drop(pipeline, it, label):
     try:
-        pipeline.process_item(it, spider)
+        pipeline.process_item(it)
         check(label, False, 'DropItem NOT raised -- expected drop')
     except DropItem:
         check(label, True, 'DropItem raised as expected')
+
+
+# Module-level logger capture helper (for tests that check _log_once output).
+# _log_once now uses the module-level logger ('src.pipelines'), not spider.logger.
+class CapturingModuleHandler(logging.Handler):
+    """Attach to logging.getLogger('src.pipelines') to capture _log_once messages."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record.getMessage())
+
+
+_module_logger = logging.getLogger('src.pipelines')
+_module_logger.setLevel(logging.DEBUG)
+_module_handler = CapturingModuleHandler()
+_module_logger.addHandler(_module_handler)
+
+
+def get_module_records() -> list[str]:
+    """Return a snapshot of records captured from the 'src.pipelines' logger."""
+    return list(_module_handler.records)
+
+
+def clear_module_records() -> None:
+    _module_handler.records.clear()
 
 
 # ===========================================================================
@@ -143,9 +171,8 @@ print('=' * 72)
 # ---------------------------------------------------------------------------
 print('\n--- 1. BG conditionRaw=service-book, serviceBookOnly=True -> kept ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
 p = make_pipeline(service_book_only=True)
-expect_pass(p, item('bg', condition_raw='service-book', offer_id=1), spider,
+expect_pass(p, item('bg', condition_raw='service-book', offer_id=1),
             'BG conditionRaw=service-book -> kept')
 
 # ---------------------------------------------------------------------------
@@ -153,9 +180,8 @@ expect_pass(p, item('bg', condition_raw='service-book', offer_id=1), spider,
 # ---------------------------------------------------------------------------
 print('\n--- 2. BG conditionRaw=technically-upright, serviceBookOnly=True -> drop ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
 p = make_pipeline(service_book_only=True)
-expect_drop(p, item('bg', condition_raw='technically-upright', offer_id=2), spider,
+expect_drop(p, item('bg', condition_raw='technically-upright', offer_id=2),
             'BG conditionRaw=technically-upright -> DropItem (exact-slug semantics)')
 
 # ---------------------------------------------------------------------------
@@ -163,9 +189,8 @@ expect_drop(p, item('bg', condition_raw='technically-upright', offer_id=2), spid
 # ---------------------------------------------------------------------------
 print('\n--- 3. BG conditionRaw=first-owner, serviceBookOnly=True -> drop ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
 p = make_pipeline(service_book_only=True)
-expect_drop(p, item('bg', condition_raw='first-owner', offer_id=3), spider,
+expect_drop(p, item('bg', condition_raw='first-owner', offer_id=3),
             'BG conditionRaw=first-owner -> DropItem (different BG condition slug)')
 
 # ---------------------------------------------------------------------------
@@ -173,11 +198,10 @@ expect_drop(p, item('bg', condition_raw='first-owner', offer_id=3), spider,
 # ---------------------------------------------------------------------------
 print('\n--- 4. BG conditionRaw=None, serviceBookOnly=True -> pass (false-negative-keep) ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
 p = make_pipeline(service_book_only=True)
 # Item with no conditionRaw key at all (mimics DropNonesPipeline having stripped it)
 it_bg_no_raw = {'offerId': 4, 'country': 'bg'}
-expect_pass(p, it_bg_no_raw, spider,
+expect_pass(p, it_bg_no_raw,
             'BG conditionRaw absent -> kept (R6 policy)')
 
 # ---------------------------------------------------------------------------
@@ -185,10 +209,9 @@ expect_pass(p, it_bg_no_raw, spider,
 # ---------------------------------------------------------------------------
 print('\n--- 5. BG conditionRaw=with-improvements, serviceBookOnly=True -> drop (substring trap check) ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
 p = make_pipeline(service_book_only=True)
 # `with-improvements` does NOT contain the exact slug `service-book` -> drop
-expect_drop(p, item('bg', condition_raw='with-improvements', offer_id=5), spider,
+expect_drop(p, item('bg', condition_raw='with-improvements', offer_id=5),
             'BG conditionRaw=with-improvements -> DropItem (substring trap correctly avoided)')
 
 # ---------------------------------------------------------------------------
@@ -196,9 +219,8 @@ expect_drop(p, item('bg', condition_raw='with-improvements', offer_id=5), spider
 # ---------------------------------------------------------------------------
 print("\n--- 6. BG conditionRaw='something;service-book;else' -> kept (set membership) ---")
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
 p = make_pipeline(service_book_only=True)
-expect_pass(p, item('bg', condition_raw='something;service-book;else', offer_id=6), spider,
+expect_pass(p, item('bg', condition_raw='something;service-book;else', offer_id=6),
             "BG conditionRaw=';'-joined with service-book -> kept (set membership)")
 
 # ---------------------------------------------------------------------------
@@ -206,16 +228,16 @@ expect_pass(p, item('bg', condition_raw='something;service-book;else', offer_id=
 # ---------------------------------------------------------------------------
 print('\n--- 7. RO unsupported -> pass + INFO log ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
+clear_module_records()
 p = make_pipeline(service_book_only=True)
-expect_pass(p, item('ro', condition_raw='used', offer_id=7), spider,
+expect_pass(p, item('ro', condition_raw='used', offer_id=7),
             'RO (unsupported) -> kept')
 check(
     'RO: _logged_inapplicable contains (serviceBookOnly, ro)',
     ('serviceBookOnly', 'ro') in HistoryFilterPipeline._logged_inapplicable,
     f'set={sorted(HistoryFilterPipeline._logged_inapplicable)}',
 )
-ro_logs = [r for r in spider.logger.records
+ro_logs = [r for r in get_module_records()
            if 'serviceBookOnly' in r and "'ro'" in r]
 check('RO: INFO log fires for serviceBookOnly inapplicable', len(ro_logs) == 1,
       f'found {len(ro_logs)} matching log records (expected exactly 1)')
@@ -225,16 +247,16 @@ check('RO: INFO log fires for serviceBookOnly inapplicable', len(ro_logs) == 1,
 # ---------------------------------------------------------------------------
 print('\n--- 8. PL unsupported -> pass + INFO log ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
+clear_module_records()
 p = make_pipeline(service_book_only=True)
-expect_pass(p, item('pl', condition_raw='notdamaged', offer_id=8), spider,
+expect_pass(p, item('pl', condition_raw='notdamaged', offer_id=8),
             'PL (unsupported) -> kept')
 check(
     'PL: _logged_inapplicable contains (serviceBookOnly, pl)',
     ('serviceBookOnly', 'pl') in HistoryFilterPipeline._logged_inapplicable,
     f'set={sorted(HistoryFilterPipeline._logged_inapplicable)}',
 )
-pl_logs = [r for r in spider.logger.records
+pl_logs = [r for r in get_module_records()
            if 'serviceBookOnly' in r and "'pl'" in r]
 check('PL: INFO log fires for serviceBookOnly inapplicable', len(pl_logs) == 1,
       f'found {len(pl_logs)} matching log records (expected exactly 1)')
@@ -244,16 +266,16 @@ check('PL: INFO log fires for serviceBookOnly inapplicable', len(pl_logs) == 1,
 # ---------------------------------------------------------------------------
 print('\n--- 9. PT unsupported -> pass + INFO log ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
+clear_module_records()
 p = make_pipeline(service_book_only=True)
-expect_pass(p, item('pt', condition_raw='usado', offer_id=9), spider,
+expect_pass(p, item('pt', condition_raw='usado', offer_id=9),
             'PT (unsupported) -> kept')
 check(
     'PT: _logged_inapplicable contains (serviceBookOnly, pt)',
     ('serviceBookOnly', 'pt') in HistoryFilterPipeline._logged_inapplicable,
     f'set={sorted(HistoryFilterPipeline._logged_inapplicable)}',
 )
-pt_logs = [r for r in spider.logger.records
+pt_logs = [r for r in get_module_records()
            if 'serviceBookOnly' in r and "'pt'" in r]
 check('PT: INFO log fires for serviceBookOnly inapplicable', len(pt_logs) == 1,
       f'found {len(pt_logs)} matching log records (expected exactly 1)')
@@ -264,19 +286,19 @@ check('PT: INFO log fires for serviceBookOnly inapplicable', len(pt_logs) == 1,
 # ---------------------------------------------------------------------------
 print("\n--- 10. UA conditionRaw='first-owner;service-book' -> pass + log (country gate trumps slug) ---")
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
+clear_module_records()
 p = make_pipeline(service_book_only=True)
 # Critical: even though the slug `service-book` is present in the joined string,
 # UA is NOT in _SERVICE_BOOK_COUNTRIES, so the country gate runs first and the
 # slug check is never reached -> item passes through and one INFO log fires.
-expect_pass(p, item('ua', condition_raw='first-owner;service-book', offer_id=10), spider,
+expect_pass(p, item('ua', condition_raw='first-owner;service-book', offer_id=10),
             'UA with service-book slug present -> kept (country gate trumps slug)')
 check(
     'UA: _logged_inapplicable contains (serviceBookOnly, ua)',
     ('serviceBookOnly', 'ua') in HistoryFilterPipeline._logged_inapplicable,
     f'set={sorted(HistoryFilterPipeline._logged_inapplicable)}',
 )
-ua_logs = [r for r in spider.logger.records
+ua_logs = [r for r in get_module_records()
            if 'serviceBookOnly' in r and "'ua'" in r]
 check('UA: INFO log fires once for serviceBookOnly inapplicable', len(ua_logs) == 1,
       f'found {len(ua_logs)} matching log records (expected exactly 1)')
@@ -286,16 +308,16 @@ check('UA: INFO log fires once for serviceBookOnly inapplicable', len(ua_logs) =
 # ---------------------------------------------------------------------------
 print('\n--- 11. KZ unsupported -> pass + INFO log ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
+clear_module_records()
 p = make_pipeline(service_book_only=True)
-expect_pass(p, item('kz', condition_raw='perfect', offer_id=11), spider,
+expect_pass(p, item('kz', condition_raw='perfect', offer_id=11),
             'KZ (unsupported) -> kept')
 check(
     'KZ: _logged_inapplicable contains (serviceBookOnly, kz)',
     ('serviceBookOnly', 'kz') in HistoryFilterPipeline._logged_inapplicable,
     f'set={sorted(HistoryFilterPipeline._logged_inapplicable)}',
 )
-kz_logs = [r for r in spider.logger.records
+kz_logs = [r for r in get_module_records()
            if 'serviceBookOnly' in r and "'kz'" in r]
 check('KZ: INFO log fires for serviceBookOnly inapplicable', len(kz_logs) == 1,
       f'found {len(kz_logs)} matching log records (expected exactly 1)')
@@ -305,13 +327,13 @@ check('KZ: INFO log fires for serviceBookOnly inapplicable', len(kz_logs) == 1,
 # ---------------------------------------------------------------------------
 print('\n--- 12. Push 5 RO items -> INFO log fires exactly once ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
+clear_module_records()
 p = make_pipeline(service_book_only=True)
 for i in range(5):
-    expect_pass(p, item('ro', condition_raw='used', offer_id=1000 + i), spider,
+    expect_pass(p, item('ro', condition_raw='used', offer_id=1000 + i),
                 f'RO item #{i + 1}/5 -> kept')
 ro_log_count = sum(
-    1 for r in spider.logger.records
+    1 for r in get_module_records()
     if 'serviceBookOnly' in r and "'ro'" in r
 )
 check('5 RO items -> exactly one INFO log for (serviceBookOnly, ro)',
@@ -326,21 +348,20 @@ check('_logged_inapplicable size == 1 after 5 RO items',
 # ---------------------------------------------------------------------------
 print('\n--- 13. reset() clears _logged_inapplicable between runs ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
 p = make_pipeline(service_book_only=True)
 # Populate the set with one cell
-p.process_item(item('ro', offer_id=2000), spider)
+p.process_item(item('ro', offer_id=2000))
 before = len(HistoryFilterPipeline._logged_inapplicable)
 check('Cell populated before reset()', before == 1, f'size before reset={before}')
 HistoryFilterPipeline.reset()
 after = len(HistoryFilterPipeline._logged_inapplicable)
 check('reset() empties _logged_inapplicable', after == 0, f'size after reset={after}')
 # Simulate a second run: log should fire again because state was cleared
-spider2 = FakeSpider()
+clear_module_records()
 p2 = make_pipeline(service_book_only=True)
-p2.process_item(item('ro', offer_id=2001), spider2)
+p2.process_item(item('ro', offer_id=2001))
 post_reset_logs = [
-    r for r in spider2.logger.records
+    r for r in get_module_records()
     if 'serviceBookOnly' in r and "'ro'" in r
 ]
 check('After reset(), INFO log fires again on next run',
@@ -355,7 +376,6 @@ check('After reset(), INFO log fires again on next run',
 # ---------------------------------------------------------------------------
 print('\n--- 14. ALL filters on, BG conditionRaw=service-book -> DROPPED by firstOwnerOnly (intersection trap) ---')
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
 p = make_pipeline(
     exclude_damaged=True,
     first_owner_only=True,
@@ -366,7 +386,7 @@ p = make_pipeline(
 #   firstOwnerOnly: BG IS in _FIRST_OWNER_COUNTRIES, conditionRaw='service-book' lacks
 #                   'first-owner' -> raise DropItem
 #   serviceBookOnly: never reached
-expect_drop(p, item('bg', condition_raw='service-book', offer_id=14), spider,
+expect_drop(p, item('bg', condition_raw='service-book', offer_id=14),
             'BG with service-book but no first-owner -> DropItem by firstOwnerOnly (intersection trap)')
 
 # ---------------------------------------------------------------------------
@@ -374,7 +394,6 @@ expect_drop(p, item('bg', condition_raw='service-book', offer_id=14), spider,
 # ---------------------------------------------------------------------------
 print("\n--- 15. ALL filters on, BG conditionRaw='service-book;first-owner' -> kept by all three filters ---")
 HistoryFilterPipeline.reset()
-spider = FakeSpider()
 p = make_pipeline(
     exclude_damaged=True,
     first_owner_only=True,
@@ -384,7 +403,7 @@ p = make_pipeline(
 #   excludeDamaged: BG not in _DAMAGED_COUNTRIES -> log + pass
 #   firstOwnerOnly: BG in _FIRST_OWNER_COUNTRIES, parts contains 'first-owner' -> pass
 #   serviceBookOnly: BG in _SERVICE_BOOK_COUNTRIES, parts contains 'service-book' -> pass
-expect_pass(p, item('bg', condition_raw='service-book;first-owner', offer_id=15), spider,
+expect_pass(p, item('bg', condition_raw='service-book;first-owner', offer_id=15),
             "BG with both slugs joined -> kept by all three filters")
 
 # ---------------------------------------------------------------------------

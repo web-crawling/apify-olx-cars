@@ -70,7 +70,7 @@ The table below compares this actor against alternative options for scraping OLX
 | Countries | 6 OLX domains (RO, PL, BG, PT, UA, KZ) | -- | Germany only | Poland only | -- |
 | Proxy required | No | -- | -- | -- | -- |
 | Output fields | 44 always-on + 5 incremental | -- | -- | -- | -- |
-| Compact output mode | Yes (18-field subset) | -- | -- | -- | Yes |
+| Compact output mode | Yes (18-field subset) | -- | -- | -- | -- |
 | Incremental / change-tracking mode | Yes | -- | -- | -- | -- |
 | Price history per listing | Yes | -- | -- | -- | -- |
 | Multi-channel notifications / alerts | Slack, Discord, Make, n8n, Zapier (Telegram via relay) | -- | -- | -- | Telegram |
@@ -256,7 +256,7 @@ The following field groups are not present in compact output:
 
 Controls the maximum character length of the `description` field. Applies in both `full` and `compact` modes regardless of `outputMode`.
 
-- **Positive integer** -- truncates the description to that many characters (byte-safe, character-boundary slice).
+- **Positive integer** -- truncates the description to that many characters (character-safe; Python slicing operates on Unicode code points, never cuts mid-character).
 - **`0`** -- drops the `description` field entirely from output.
 - **Unset (default)** -- no truncation; descriptions are emitted at full length.
 

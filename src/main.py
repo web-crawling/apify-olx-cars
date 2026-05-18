@@ -26,7 +26,7 @@ from scrapy.utils.defer import deferred_to_future
 
 import statistics
 
-from .pipelines import FairPricePipeline, HistoryFilterPipeline, IncrementalDiffPipeline, _drop_nones
+from .pipelines import FairPricePipeline, HistoryFilterPipeline, IncrementalDiffPipeline, NotificationBufferPipeline, _drop_nones
 from .spiders.olx_cars import OlxCarsSpider
 
 
@@ -99,6 +99,63 @@ async def main() -> None:
         emit_missing = bool(actor_input.get('emitMissing', False))
         run_ts = datetime.now(tz=timezone.utc).isoformat()
 
+        # --- Notification input validation (#29) ---
+        valid_notify_on = {'none', 'new_listings', 'price_drops', 'both'}
+        notify_on_raw = actor_input.get('notifyOn', 'none')
+        notify_on = str(notify_on_raw).lower() if notify_on_raw else 'none'
+        if notify_on not in valid_notify_on:
+            Actor.log.warning(
+                'Invalid notifyOn %r — defaulting to "none".', notify_on_raw,
+            )
+            notify_on = 'none'
+
+        if notify_on != 'none' and not incremental_mode:
+            await Actor.fail(
+                status_message=(
+                    'notifyOn requires incrementalMode: true. '
+                    'Enable Incremental Mode or set notifyOn to "none".'
+                )
+            )
+            return
+
+        notify_min_pct_raw = actor_input.get('notifyMinPriceDropPct', 5)
+        try:
+            notify_min_price_drop_pct = int(notify_min_pct_raw)
+            if not (1 <= notify_min_price_drop_pct <= 99):
+                Actor.log.warning(
+                    'notifyMinPriceDropPct %r out of range [1,99] — clamping.',
+                    notify_min_pct_raw,
+                )
+                notify_min_price_drop_pct = max(1, min(99, notify_min_price_drop_pct))
+        except (TypeError, ValueError):
+            Actor.log.warning(
+                'Invalid notifyMinPriceDropPct %r — defaulting to 5.', notify_min_pct_raw,
+            )
+            notify_min_price_drop_pct = 5
+
+        notify_top_n_raw = actor_input.get('notifyTopN', 20)
+        try:
+            notify_top_n = int(notify_top_n_raw)
+            if not (1 <= notify_top_n <= 200):
+                Actor.log.warning(
+                    'notifyTopN %r out of range [1,200] — clamping.', notify_top_n_raw,
+                )
+                notify_top_n = max(1, min(200, notify_top_n))
+        except (TypeError, ValueError):
+            Actor.log.warning(
+                'Invalid notifyTopN %r — defaulting to 20.', notify_top_n_raw,
+            )
+            notify_top_n = 20
+
+        notify_webhook_url_raw = actor_input.get('notifyWebhookUrl', '') or ''
+        notify_webhook_url = str(notify_webhook_url_raw).strip()
+        if notify_webhook_url and not notify_webhook_url.startswith(('http://', 'https://')):
+            Actor.log.warning(
+                'notifyWebhookUrl %r is not a valid http(s) URL — disabling outbound POST.',
+                notify_webhook_url,
+            )
+            notify_webhook_url = ''
+
         snapshot: dict = {}
         kv_store = None
         if incremental_mode:
@@ -146,6 +203,11 @@ async def main() -> None:
                 'emitMissing': emit_missing,
                 '_snapshot': snapshot,
                 '_runTs': run_ts,
+                # --- Notification fields (#29) ---
+                'notifyOn': notify_on,
+                'notifyMinPriceDropPct': notify_min_price_drop_pct,
+                'notifyTopN': notify_top_n,
+                'notifyWebhookUrl': notify_webhook_url,
             },
             priority='spider',
         )
@@ -159,6 +221,9 @@ async def main() -> None:
         IncrementalDiffPipeline.was_truncated = False
         FairPricePipeline.items_buffer = []
         FairPricePipeline.keys_buffer = []
+        NotificationBufferPipeline.new_items_buffer = []
+        NotificationBufferPipeline.price_drop_buffer = []
+        NotificationBufferPipeline._counts = {}
 
         # --- Run the spider ---
         crawler_runner = CrawlerRunner(settings)
@@ -264,6 +329,146 @@ async def main() -> None:
                 FairPricePipeline.min_bucket_size,
                 enriched_count,
             )
+
+        # --- Post-crawl: notification digest emit (#29) ---
+        if notify_on != 'none':
+            import asyncio
+            import json as _json
+            import os as _os
+            import urllib.error
+            import urllib.request
+
+            run_finished_at = datetime.now(tz=timezone.utc).isoformat()
+            run_id = _os.environ.get('ACTOR_RUN_ID') or _os.environ.get('APIFY_ACTOR_RUN_ID') or 'local'
+            actor_id = _os.environ.get('ACTOR_ID') or _os.environ.get('APIFY_ACTOR_ID') or 'local'
+
+            counts_raw = dict(NotificationBufferPipeline._counts)
+            counts = {
+                'new': counts_raw.get('NEW', 0),
+                'updated': counts_raw.get('UPDATED', 0),
+                'unchanged': counts_raw.get('UNCHANGED', 0),
+                'missing': counts_raw.get('MISSING', 0),
+                'reappeared': counts_raw.get('REAPPEARED', 0),
+                'total': counts_raw.get('total', 0),
+                'priceDropsQualified': len(NotificationBufferPipeline.price_drop_buffer),
+            }
+
+            # Top-N new items by firstSeenAt desc (None sorts last)
+            def _new_sort_key(d: dict) -> str:
+                return d.get('firstSeenAt') or ''
+            new_items = sorted(
+                NotificationBufferPipeline.new_items_buffer,
+                key=_new_sort_key,
+                reverse=True,
+            )[:notify_top_n]
+
+            # Top-N price drops by priceDropPct desc
+            price_drops = sorted(
+                NotificationBufferPipeline.price_drop_buffer,
+                key=lambda d: d.get('priceDropPct') or 0,
+                reverse=True,
+            )[:notify_top_n]
+
+            # Filters echo
+            filters_echo = {
+                'yearFrom': actor_input.get('yearFrom'),
+                'yearTo': actor_input.get('yearTo'),
+                'priceFrom': actor_input.get('priceFrom'),
+                'priceTo': actor_input.get('priceTo'),
+                'priceCurrency': actor_input.get('priceCurrency', 'EUR'),
+            }
+
+            # Cold-start indicator: snapshot was empty at the start of this run
+            is_cold_start = incremental_mode and len(snapshot) == 0
+            if is_cold_start:
+                seeded_count = len(IncrementalDiffPipeline.updated_snapshot)
+                summary_text = (
+                    f'OLX Cars baseline run ({country}, notifyOn={notify_on}): '
+                    f'0 changes emitted (snapshot seeded with '
+                    f'{seeded_count} listings). '
+                    f'Next run will detect changes.'
+                )
+            else:
+                bits = []
+                if notify_on in ('new_listings', 'both'):
+                    bits.append(f'{counts["new"]} new')
+                if notify_on in ('price_drops', 'both'):
+                    n_drops = counts['priceDropsQualified']
+                    bits.append(
+                        f'{n_drops} price drop'
+                        f'{"s" if n_drops != 1 else ""} '
+                        f'(>={notify_min_price_drop_pct}%)'
+                    )
+                summary_text = (
+                    f'OLX Cars run ({country}, notifyOn={notify_on}): '
+                    f'{", ".join(bits) or "no qualifying changes"}.'
+                )
+            # Cap at 280 chars (Telegram single-message limit)
+            if len(summary_text) > 280:
+                summary_text = summary_text[:277] + '...'
+
+            digest = {
+                'runId': run_id,
+                'actorId': actor_id,
+                'runStartedAt': run_ts,
+                'runFinishedAt': run_finished_at,
+                'notifyOn': notify_on,
+                'country': country,
+                'query': actor_input.get('query'),
+                'brands': brands_raw,
+                'startUrlsCount': len(start_urls_raw),
+                'filters': filters_echo,
+                'counts': counts,
+                'newItems': new_items,
+                'priceDrops': price_drops,
+                'summaryText': summary_text,
+            }
+
+            # Write to named KV store (separate from incremental-state store)
+            try:
+                notif_store = await Actor.open_key_value_store(name='olx-cars-notifications')
+                await notif_store.set_value('digest-latest', digest)
+                await notif_store.set_value(f'digest-{run_id}', digest)
+                Actor.log.info(
+                    'NotificationDigest: emitted to KV store '
+                    '"olx-cars-notifications" (runId=%s), new=%d, priceDrops=%d',
+                    run_id, counts['new'], counts['priceDropsQualified'],
+                )
+            except Exception as exc:
+                Actor.log.error(
+                    'NotificationDigest: KV write failed: %s', exc,
+                )
+                # KV write failure IS fatal — if we can't persist the digest,
+                # the user's notification pipeline is silently broken.
+                OlxCarsSpider.crawl_failed = True
+
+            # Optional outbound HTTP POST (non-fatal on failure)
+            if notify_webhook_url:
+                def _post_digest():
+                    body = _json.dumps(digest).encode('utf-8')
+                    req = urllib.request.Request(
+                        notify_webhook_url,
+                        data=body,
+                        method='POST',
+                        headers={'Content-Type': 'application/json'},
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        return r.status
+
+                try:
+                    status = await asyncio.get_event_loop().run_in_executor(
+                        None, _post_digest,
+                    )
+                    Actor.log.info(
+                        'NotificationDigest: webhook POST to %s -> HTTP %d',
+                        notify_webhook_url, status,
+                    )
+                except (urllib.error.HTTPError, urllib.error.URLError, OSError, TimeoutError) as exc:
+                    Actor.log.warning(
+                        'NotificationDigest: webhook POST to %s failed: %s '
+                        '(non-fatal, dataset is unaffected)',
+                        notify_webhook_url, exc,
+                    )
 
         # --- Check for fatal errors ---
         # CRITICAL: access OlxCarsSpider.crawl_failed as a CLASS attribute.

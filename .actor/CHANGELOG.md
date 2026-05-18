@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.9.0 — 2026-05-18
+
+### Added
+- **Multi-channel notifications** — new opt-in digest feature for incremental-mode runs.
+  Enable via the new `notifyOn` input (`"none"` / `"new_listings"` / `"price_drops"` / `"both"`;
+  default `"none"`). When enabled, the actor builds a structured digest at run end and writes
+  it to the persistent `olx-cars-notifications` Apify key-value store under two keys:
+  `digest-latest` (overwritten each run) and `digest-<runId>` (immutable per-run archive).
+  Optionally POST the same digest JSON to any HTTP endpoint via the new `notifyWebhookUrl`
+  input — supports Slack incoming webhooks, Discord webhooks, Make/n8n/Zapier, and any
+  generic HTTPS endpoint. Telegram direct POST requires a relay (see README).
+
+- **`notifyOn`** (enum string, default `"none"`) — controls which events trigger a digest:
+  `new_listings` (new listings only), `price_drops` (price drops only), `both`
+  (new listings and price drops). Setting `notifyOn != "none"` without
+  `incrementalMode: true` causes the actor to fail immediately with a clear error message.
+
+- **`notifyMinPriceDropPct`** (integer 1–99, default `5`) — minimum price reduction
+  percentage vs the prior-run snapshot price for a listing to appear in the digest's
+  `priceDrops` array. Values outside 1–99 are clamped with a WARNING.
+
+- **`notifyTopN`** (integer 1–200, default `20`) — maximum number of items in each digest
+  section (`newItems` and `priceDrops`). New listings are ranked by most-recent `firstSeenAt`;
+  price drops are ranked by highest `priceDropPct`. Values outside 1–200 are clamped.
+
+- **`notifyWebhookUrl`** (string, default `""`) — optional HTTPS URL to POST the digest
+  JSON to at run end. POST failure is non-fatal (WARNING only; the digest is still saved to
+  the KV store). Keep the URL private — it is stored in run input history.
+
+### Notes
+- The digest is **not** written to the actor dataset. It lands exclusively in the
+  `olx-cars-notifications` named KV store, keeping the car-listing dataset homogeneous.
+- The first run with `notifyOn` enabled (cold start) emits an empty digest with
+  `counts.new == 0` and a `summaryText` indicating "baseline run". This is expected and
+  provides a positive heartbeat confirming the notification pipeline is wired correctly.
+- Closes [#29](https://github.com/web-crawling/apify-olx-cars/issues/29).
+
 ## v0.8.0 — 2026-05-18
 
 ### Added

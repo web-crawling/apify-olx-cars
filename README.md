@@ -57,6 +57,7 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **44 always-on top-level fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through. Four additional conditionally-present fields (`extraAttributes`, `priceVsMedianPct`, `priceRating`, `conditionRaw`) are included when applicable.
 - **No proxy required** -- direct datacenter access to OLX's public API.
 - **Incremental monitoring mode** -- opt-in change tracking across runs; emit only new, updated, or missing listings instead of the full dataset every time.
+- **Multi-channel notifications** -- opt-in digest of new listings and price drops at run end; delivered to a named Apify KV store (`olx-cars-notifications`) and/or POSTed to any webhook URL (Slack, Discord, Make, n8n, Zapier, or generic HTTP). Requires `incrementalMode: true`.
 
 ## How This Compares
 
@@ -202,6 +203,10 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 | `stateKey` | string | NO | `"olx-cars-state"` | KV store key for the snapshot. Use a unique key per monitoring job. |
 | `emitUnchanged` | boolean | NO | `false` | Also emit listings with no tracked-field changes (`changeType: UNCHANGED`). |
 | `emitMissing` | boolean | NO | `false` | Emit listings absent from current results (`changeType: MISSING`). Auto-suppressed when `maxItems` truncates the run. |
+| `notifyOn` | enum | NO | `"none"` | Controls which events trigger a digest at run end. `"none"` = disabled (no digest built). `"new_listings"` = digest of new listings only. `"price_drops"` = digest of price drops only. `"both"` = new listings and price drops. Requires `incrementalMode: true` — setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to fail immediately with a clear error message. See the Notifications section. |
+| `notifyMinPriceDropPct` | integer (1–99) | NO | `5` | Minimum price reduction percentage vs the prior snapshot price for a listing to qualify as a price-drop event in the digest. Only meaningful when `notifyOn` is `"price_drops"` or `"both"`. Values outside 1–99 are clamped with a WARNING. |
+| `notifyTopN` | integer (1–200) | NO | `20` | Maximum number of items in each section (`newItems`, `priceDrops`) of the digest payload. Items are ranked by most-recent `firstSeenAt` (new listings) or highest `priceDropPct` (price drops). Values outside 1–200 are clamped with a WARNING. |
+| `notifyWebhookUrl` | string | NO | `""` | Optional HTTPS URL to POST the digest JSON to at run end. Leave empty to disable outbound HTTP. When set, the actor performs a single `Content-Type: application/json` POST. Supports Slack incoming webhooks, Discord webhooks, and any generic HTTP endpoint. POST failure is non-fatal (WARNING only; scrape results are already saved). Keep this URL private — it is stored in run input history. |
 
 **Input mode precedence:** `startUrls` wins when provided. All structured filters (`country`, `brands`, `query`, `yearFrom`, `yearTo`, `priceFrom`, `priceTo`, `priceCurrency`) are ignored when `startUrls` is set. Only `maxItems` and `sortBy` apply alongside `startUrls`. A warning is logged if structured filters are set alongside `startUrls`.
 
@@ -591,6 +596,178 @@ This emits `NEW`, `UPDATED`, and `REAPPEARED` items only. A listing with a chang
 
 Adding `emitMissing: true` causes the actor to also emit items with `changeType: MISSING` for listings that were in the previous snapshot but absent from the current results. On an active market like OLX Romania, expect 30-50% of tracked listings to appear as MISSING per day.
 
+## Notifications
+
+Notifications is an opt-in feature that builds a structured digest at the end of each run, summarising new listings and price drops detected since the previous run. The digest is written to a persistent Apify key-value store and, optionally, POSTed to a webhook URL of your choice.
+
+### Requirements
+
+- **`incrementalMode: true` is required.** Setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to exit immediately with the error message: `"notifyOn requires incrementalMode: true. Enable Incremental Mode or set notifyOn to 'none'."` This is a hard fail, not a silent no-op — the scrape does not start.
+- No proxy or authentication is required for the KV store path. The `notifyWebhookUrl` path requires you to supply your own webhook URL.
+
+### Input parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `notifyOn` | `"none"` | Which events trigger a digest. One of: `none` (disabled), `new_listings`, `price_drops`, `both`. |
+| `notifyMinPriceDropPct` | `5` | Minimum % price drop vs the prior snapshot for a listing to appear in the `priceDrops` digest array. Integer 1–99; values outside range are clamped. |
+| `notifyTopN` | `20` | Maximum items in each digest section (`newItems` and `priceDrops`). Integer 1–200; values outside range are clamped. |
+| `notifyWebhookUrl` | `""` | Optional HTTPS URL to POST the digest JSON to at run end. Empty = no outbound HTTP. |
+
+### Digest payload
+
+The digest is a single JSON object. Below is an abbreviated example:
+
+```json
+{
+  "runId": "abc123",
+  "actorId": "YEwcICSxWGYIr368r",
+  "runStartedAt": "2026-05-18T10:00:00Z",
+  "runFinishedAt": "2026-05-18T10:05:32Z",
+  "notifyOn": "both",
+  "country": "ro",
+  "query": null,
+  "brands": ["BMW", "Volkswagen"],
+  "startUrlsCount": 0,
+  "filters": {
+    "yearFrom": 2015,
+    "yearTo": 2023,
+    "priceFrom": 5000,
+    "priceTo": 15000,
+    "priceCurrency": "EUR"
+  },
+  "counts": {
+    "new": 12,
+    "updated": 34,
+    "unchanged": 210,
+    "missing": 8,
+    "reappeared": 2,
+    "total": 256,
+    "priceDropsQualified": 5
+  },
+  "newItems": [
+    {
+      "offerId": 303514047,
+      "url": "https://www.olx.ro/d/oferta/...",
+      "title": "BMW X5 3.0d xDrive",
+      "price": 9500,
+      "currency": "EUR",
+      "year": 2017,
+      "mileageKm": 145000,
+      "make": "BMW",
+      "model": "X5",
+      "firstSeenAt": "2026-05-18T10:05:00Z"
+    }
+  ],
+  "priceDrops": [
+    {
+      "offerId": 303400001,
+      "url": "https://www.olx.ro/d/oferta/...",
+      "title": "VW Golf TDI 2018",
+      "priceCurrent": 7200,
+      "pricePrevious": 8000,
+      "priceDropPct": 10.0,
+      "currency": "EUR"
+    }
+  ],
+  "summaryText": "OLX Cars run completed. 12 new listings, 5 price drops (≥5%). Top new: BMW X5 3.0d (€9,500) — see full digest in Apify KV store."
+}
+```
+
+**Key fields:**
+- `counts.priceDropsQualified` — total UPDATED items that passed the `notifyMinPriceDropPct` threshold, regardless of `notifyTopN` truncation.
+- `newItems` — up to `notifyTopN` items sorted by most-recent `firstSeenAt`. Each entry carries: `offerId, url, title, price, currency, year, mileageKm, make, model, firstSeenAt`.
+- `priceDrops` — up to `notifyTopN` items sorted by highest `priceDropPct`. Each entry carries: `offerId, url, title, priceCurrent, pricePrevious, priceDropPct, currency`. Items with an undisclosed price are excluded.
+- `summaryText` — pre-formatted human-readable one-liner, max 280 characters (Telegram-compatible length). Suitable as a direct Slack or Discord message body without custom templating.
+- `startUrlsCount` — scalar count of `startUrls` entries when that input mode was used. The full `startUrls` array is not included (could be very large).
+
+### Where the digest is stored
+
+Every run with `notifyOn != "none"` writes the digest to the **`olx-cars-notifications`** Apify key-value store (a named store, separate from the incremental-state store). Two keys are written:
+
+- **`digest-latest`** — overwritten every run. Fetch this when you always want the most recent digest.
+- **`digest-<runId>`** — immutable per-run archive. Fetch by `runId` (available in Apify webhook payloads) to retrieve a specific run's digest.
+
+The digest is **not** written to the actor's dataset — it is structurally incompatible with car-listing items and would break dataset exports.
+
+To find `STORE_ID` for the `olx-cars-notifications` store: Apify console → Storage → Key-value stores → `olx-cars-notifications` → copy the store ID from the URL.
+
+### First-run (cold-start) behaviour
+
+The digest **is emitted on the first run** (cold start), even though the dataset will be empty. On cold start:
+- `counts.new` is `0` (all new items are suppressed to build the baseline snapshot).
+- `newItems` and `priceDrops` arrays are empty.
+- `summaryText` reads: `"OLX Cars baseline run: 0 items emitted (snapshot seeded with N listings). Next run will detect changes."`
+
+This is a positive heartbeat. If you have a Slack or Discord integration, you will see a "baseline run" message on the first run, then real event messages from the second run onward.
+
+### Channel integration recipes
+
+The actor offers two delivery paths. They are independent and can be used simultaneously.
+
+#### Path A — Apify-native webhook + KV store (recommended, no credentials in actor input)
+
+This path keeps your webhook credentials out of the actor's run input entirely. You configure the integration once in the Apify console.
+
+1. In the Apify console, go to **Settings → Integrations → Add webhook**.
+2. Set event: **"Actor run finished"**.
+3. Action: **"Fetch a URL"**.
+4. URL: `https://api.apify.com/v2/key-value-stores/{STORE_ID}/records/digest-latest?token={API_TOKEN}`
+   - Replace `{STORE_ID}` with the store ID of `olx-cars-notifications` (see above).
+   - Replace `{API_TOKEN}` with your Apify API token.
+5. Forward the fetched JSON to your channel using the integration's built-in HTTP action, or pipe it to Zapier/Make for further routing.
+
+#### Path B — Direct webhook POST via `notifyWebhookUrl`
+
+Set `notifyWebhookUrl` in your actor input to have the actor POST the digest JSON directly at run end.
+
+##### Slack incoming webhook (direct POST)
+
+```json
+{
+  "country": "ro",
+  "brands": ["BMW"],
+  "incrementalMode": true,
+  "stateKey": "olx-cars-ro-bmw",
+  "notifyOn": "both",
+  "notifyWebhookUrl": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXX"
+}
+```
+
+The actor POSTs the raw digest JSON. Slack's incoming webhook endpoint (`https://hooks.slack.com/services/...`) accepts arbitrary JSON but renders only the `text` key as a formatted message. The `summaryText` field maps directly to what Slack would display if the body were `{"text": "..."}`, but the actor sends the full digest object — Slack will silently ignore all fields except `text` (which is absent in our payload) and show nothing. **For a properly formatted Slack message, use the Apify-native webhook path (Path A) and use Make or Zapier to shape the `summaryText` field into `{"text": "..."}` before forwarding to Slack.**
+
+##### Discord webhook (direct POST)
+
+```json
+{
+  "notifyOn": "new_listings",
+  "notifyWebhookUrl": "https://discord.com/api/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
+}
+```
+
+Discord's webhook endpoint expects `{"content": "..."}`. The actor sends raw digest JSON. Similar to Slack, Discord will not render the message natively. For a clean Discord message, use the Apify-native webhook path (Path A) and shape `summaryText` into `{"content": summaryText}` in Make or Zapier before posting to Discord.
+
+##### Telegram Bot API (not supported via direct POST)
+
+Telegram's `sendMessage` API endpoint (`https://api.telegram.org/bot{BOT_TOKEN}/sendMessage`) expects a bespoke JSON body: `{"chat_id": ..., "text": ...}`. The actor POSTs the raw digest JSON, which does not match this shape. **Direct `notifyWebhookUrl` to the Telegram Bot API does not work.**
+
+Recommended approach for Telegram:
+- **Option 1 (recommended):** Use the Apify-native webhook path (Path A) to read the digest from the KV store, then pipe it through Zapier, Make, or n8n with a "Send Telegram message" step. These platforms have native Telegram actions that accept the `summaryText` field as the message body.
+- **Option 2:** Write a small relay server (e.g. a Cloudflare Worker or AWS Lambda) that accepts the raw digest POST and forwards `summaryText` to `api.telegram.org/bot.../sendMessage`.
+
+##### Generic POST / Make / n8n / Zapier
+
+```json
+{
+  "notifyOn": "price_drops",
+  "notifyMinPriceDropPct": 10,
+  "notifyTopN": 5,
+  "notifyWebhookUrl": "https://hook.us1.make.com/..."
+}
+```
+
+Make, n8n, and Zapier all handle arbitrary JSON bodies natively. This is the easiest path for custom routing — the full digest object is available in the workflow for you to parse, filter, and forward as needed.
+
 ## Limitations and Known Issues
 
 **OLX API caps a single unfiltered query at 1,000 results.** One country-wide structured-filter run retrieves at most 1,000 of the approximately 128,000 listings available. The actor logs an INFO message when the cap is hit, explaining how to enumerate more. When `maxItems > 1000`, the actor automatically fans out over brand and year sub-slices to retrieve more data -- this significantly increases run time and compute cost.
@@ -627,6 +804,14 @@ If you need a heuristic body-type classification for BG listings, read the `para
 **`extraAttributes` values are in the listing language.** The `extraAttributes` dict passes through OLX param labels as-is: Romanian on olx.ro, Polish on olx.pl, Bulgarian Cyrillic on olx.bg, etc. These are not normalised to English. For the normalised versions of fuel type, transmission, and body type, use the top-level `fuelType`, `transmission`, and `bodyType` fields instead.
 
 **GPS coordinates may be obfuscated.** Some sellers hide their exact location. When `location.gpsObfuscated` is `true`, the `latitude` and `longitude` coordinates represent a neighbourhood centroid rather than the exact address.
+
+**Notifications require `incrementalMode: true`.** Setting `notifyOn` to anything other than `"none"` while `incrementalMode: false` causes the actor to fail with a clear error message before the scrape starts. This is by design — new-listing and price-drop signals are undefined without a prior-run snapshot to compare against.
+
+**Direct `notifyWebhookUrl` POST to Slack or Discord does not render natively.** The actor POSTs the raw digest JSON. Slack and Discord expect `{"text": "..."}` and `{"content": "..."}` shaped bodies respectively for rendered messages. Use the Apify-native webhook path (Path A in the Notifications section) with Make or Zapier to shape the payload before forwarding.
+
+**Direct `notifyWebhookUrl` POST to Telegram Bot API is not supported.** Telegram's `sendMessage` endpoint requires a bespoke `{"chat_id": ..., "text": ...}` body. Use Zapier, Make, or n8n to relay the digest, or author a small relay server. See the Notifications section for details.
+
+**Notification webhook POST failure does not fail the actor run.** If the outbound HTTP POST to `notifyWebhookUrl` fails, the actor logs a WARNING and the run completes with `SUCCEEDED` status. The digest is still written to the `olx-cars-notifications` KV store. Only the outbound POST is affected.
 
 ## Frequently Asked Questions
 

@@ -17,6 +17,13 @@ Pipelines:
     by offerId within a run, and drops UNCHANGED items when emitUnchanged
     is False. Pass-through when incrementalMode: false.
 
+  NotificationBufferPipeline — observational pipeline (priority 250) that
+    collects compact summaries of NEW items and qualifying price-drop UPDATED
+    items into class-attribute buffers for the post-crawl digest builder in
+    main.py. Near-zero overhead when notifyOn='none'. Never raises DropItem
+    — items continue through DropNonesPipeline, FairPricePipeline, and the
+    Apify push pipeline unchanged. See issue #29.
+
   DropNonesPipeline — recursively removes None values from items before
     they reach the Apify dataset push pipeline. Apify's dataset schema
     rejects null for typed fields (Draft7 default behavior), so items
@@ -448,3 +455,137 @@ class FairPricePipeline:
         if pct < 15.0:
             return 'high'
         return 'very_high'
+
+
+class NotificationBufferPipeline:
+    """Observational pipeline that buffers compact item summaries for the post-crawl digest.
+
+    Runs at priority 250 — AFTER IncrementalDiffPipeline (200) so that
+    ``changeType`` and ``priceHistory`` are already attached to each item,
+    and BEFORE DropNonesPipeline (500) so None values are still present
+    (read-only; we never mutate item content).
+
+    Class-attribute buffers (mirroring FairPricePipeline pattern):
+      new_items_buffer  — compact dicts for NEW items
+      price_drop_buffer — compact dicts for UPDATED items with qualifying price drops
+      _counts           — running totals keyed by changeType plus 'total'
+
+    These are class attributes so main.py can read them after the crawl via
+    ``NotificationBufferPipeline.new_items_buffer`` etc.  CrawlerRunner.crawl()
+    returns None, not a pipeline instance, so instance attribute access from
+    main.py is impossible — class attributes are the only safe path.
+
+    When ``notifyOn == 'none'`` (default), open_spider sets ``_enabled = False``
+    and process_item returns early with near-zero overhead.  No buffers are
+    populated, no changeType is accessed.
+
+    Never raises DropItem.  Items continue through the full pipeline chain:
+    DropNonesPipeline (500) → FairPricePipeline (600) → Apify push (1000).
+
+    See issue #29 and architecture doc section 4 for the full design rationale.
+    """
+
+    # Class-attribute buffers — reset in open_spider() and in main.py pre-run reset.
+    new_items_buffer: list = []
+    price_drop_buffer: list = []
+    _counts: dict = {}
+
+    def open_spider(self, spider) -> None:
+        """Read notification input from INPUT_DATA; reset class-attribute buffers."""
+        # Defensive reset (mirrors FairPricePipeline.open_spider pattern).
+        # main.py also resets these before the crawl, but the pipeline-level
+        # reset guards against edge cases where open_spider fires multiple times.
+        type(self).new_items_buffer = []
+        type(self).price_drop_buffer = []
+        type(self)._counts = {}
+
+        input_data = spider.settings.get('INPUT_DATA') or {}
+        notify_on = str(input_data.get('notifyOn') or 'none').lower()
+
+        valid_notify_on = {'none', 'new_listings', 'price_drops', 'both'}
+        if notify_on not in valid_notify_on:
+            notify_on = 'none'
+
+        self._enabled: bool = notify_on in {'new_listings', 'price_drops', 'both'}
+        self._include_new: bool = notify_on in {'new_listings', 'both'}
+        self._include_drops: bool = notify_on in {'price_drops', 'both'}
+
+        try:
+            self._min_pct: int = int(input_data.get('notifyMinPriceDropPct', 5))
+        except (TypeError, ValueError):
+            self._min_pct = 5
+
+        if self._enabled:
+            logger.info(
+                'NotificationBufferPipeline: enabled — notifyOn=%r '
+                'include_new=%s include_drops=%s min_pct=%d',
+                notify_on, self._include_new, self._include_drops, self._min_pct,
+            )
+
+    def process_item(self, item, spider):
+        """Observe item; update counts and buffers. Never raises DropItem."""
+        if not self._enabled:
+            return item
+
+        # changeType is attached by IncrementalDiffPipeline (priority 200).
+        # When incrementalMode=False, changeType is absent; the pipeline is
+        # disabled for that case too (notifyOn != none + incrementalMode=False
+        # triggers Actor.fail() in main.py before the crawl starts).
+        change_type = item.get('changeType')
+        if change_type is None:
+            # incrementalMode=False path — should not happen due to main.py
+            # guard, but be defensive.
+            return item
+
+        # Always count every item by changeType
+        type(self)._counts[change_type] = (
+            type(self)._counts.get(change_type, 0) + 1
+        )
+        type(self)._counts['total'] = (
+            type(self)._counts.get('total', 0) + 1
+        )
+
+        # --- Buffer NEW items ---
+        if self._include_new and change_type == 'NEW':
+            type(self).new_items_buffer.append({
+                'offerId': item.get('offerId'),
+                'url': item.get('url'),
+                'title': item.get('title'),
+                'price': item.get('price'),
+                'currency': item.get('currency'),
+                'year': item.get('year'),
+                'mileageKm': item.get('mileageKm'),
+                'make': item.get('make'),
+                'model': item.get('model'),
+                'firstSeenAt': item.get('firstSeenAt'),
+            })
+
+        # --- Buffer qualifying price drops for UPDATED items ---
+        if self._include_drops and change_type == 'UPDATED':
+            price_history = item.get('priceHistory') or []
+            curr_price = item.get('price')
+
+            if len(price_history) >= 2 and curr_price is not None:
+                prev_entry = price_history[-2]
+                prev_price = prev_entry.get('price') if isinstance(prev_entry, dict) else None
+
+                if prev_price is not None and prev_price > 0 and curr_price < prev_price:
+                    try:
+                        pct = round(
+                            (prev_price - curr_price) / prev_price * 100.0, 2
+                        )
+                        if pct >= self._min_pct:
+                            type(self).price_drop_buffer.append({
+                                'offerId': item.get('offerId'),
+                                'url': item.get('url'),
+                                'title': item.get('title'),
+                                'priceCurrent': curr_price,
+                                'pricePrevious': prev_price,
+                                'priceDropPct': pct,
+                                'currency': item.get('currency'),
+                            })
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        # Bad numeric data in priceHistory — skip silently.
+                        pass
+
+        return item

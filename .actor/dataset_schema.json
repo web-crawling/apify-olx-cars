@@ -241,6 +241,10 @@
 				"type": "string",
 				"description": "Qualitative fair-price rating derived from priceVsMedianPct. Values: very_good (>= 15% below median), good (5–15% below), fair (within ±5%), high (5–15% above), very_high (>= 15% above). Absent when priceVsMedianPct is absent."
 			},
+			"conditionRaw": {
+				"type": "string",
+				"description": "Raw OLX condition slug(s) before CONDITION_NORMALIZATION. Scalar string on RO/PL/PT/BG/KZ (e.g. \"first-owner\", \"service-book\", \"damaged\", \"used\"). On UA where OLX returns an array, slugs are joined with \";\" (e.g. \"first-owner;after-accident\"). Absent when the listing has no condition param. Useful when you need the raw OLX taxonomy."
+			},
 			"seller": {
 				"type": "object",
 				"description": "Seller profile information",

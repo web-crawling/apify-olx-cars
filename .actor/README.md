@@ -37,7 +37,7 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **Not yet supported:** Brazil (olx.com.br) -- runs on a different stack with Cloudflare protection; a separate actor is on the roadmap.
 - **Data source:** OLX's public `/api/v1/offers/` JSON endpoint.
 - **Proxy required:** No.
-- **Output:** JSON -- 43 always-on top-level fields per listing (price, make, model, year, mileage, fuel, transmission, body type, seller info, location, photo URLs) plus 5 incremental-mode-only fields when `incrementalMode: true`, plus `extraAttributes`, `priceVsMedianPct`, and `priceRating` when applicable.
+- **Output:** JSON -- 44 always-on top-level fields per listing (price, make, model, year, mileage, fuel, transmission, body type, condition raw slug, seller info, location, photo URLs) plus 5 incremental-mode-only fields when `incrementalMode: true`, plus `extraAttributes`, `priceVsMedianPct`, and `priceRating` when applicable. (`conditionRaw` is absent when the listing has no condition param, but is included when present.)
 - **Throughput:** 40-65 listings per API call; one country's full structured-filter run typically returns up to 1,000 listings before the OLX cap.
 - **Coverage past 1,000 results:** automatic brand-level and year-band slicing when `maxItems > 1000`.
 - **Authentication:** none required -- runs against public listing endpoints.
@@ -51,9 +51,10 @@ The actor auto-detects the country from the hostname (`olx.ro` → Romania, `olx
 - **Automatic slicing past the 1,000-result API cap** -- when `maxItems > 1000`, the actor fans out over brand-level and year-band sub-queries to maximise coverage.
 - **Normalised vehicle specs** -- `fuelType`, `transmission`, `bodyType`, and `condition` are mapped to consistent English enums across all six countries despite regional API vocabulary differences.
 - **Seller type filtering** -- narrow results to private sellers (`sellerType: "private"`) or dealers (`sellerType: "business"`); universal across all six countries.
+- **History condition filters** -- `excludeDamaged` drops accident/damaged listings client-side; `firstOwnerOnly` keeps only first-owner listings. Each filter applies where OLX exposes the relevant flag (see the per-country support matrix in the Input Parameters section); unsupported countries are skipped silently.
 - **Within-run fair-price rating** -- `priceVsMedianPct` and `priceRating` computed from the listings in each run; useful when running broad queries where enough comparable listings form a bucket.
 - **Country-specific attributes pass-through** -- `extraAttributes` exposes all OLX `params[]` fields not already in top-level output, including door count, engine power, body sub-type, and other locale-specific values.
-- **43 always-on top-level fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through. Three additional conditionally-present fields (`extraAttributes`, `priceVsMedianPct`, `priceRating`) are included when applicable.
+- **44 always-on top-level fields per listing** -- identification, pricing, technical specs, seller info, location with GPS (obfuscation flagged), photo URLs, raw params pass-through. Four additional conditionally-present fields (`extraAttributes`, `priceVsMedianPct`, `priceRating`, `conditionRaw`) are included when applicable.
 - **No proxy required** -- direct datacenter access to OLX's public API.
 - **Incremental monitoring mode** -- opt-in change tracking across runs; emit only new, updated, or missing listings instead of the full dataset every time.
 
@@ -65,7 +66,7 @@ The table below compares this actor against alternative options for scraping OLX
 |---|---|---|---|---|---|
 | Countries | 6 OLX domains (RO, PL, BG, PT, UA, KZ) | — | Germany only | Poland only | — |
 | Proxy required | No | — | — | — | — |
-| Output fields | 43 always-on + 5 incremental | — | — | — | — |
+| Output fields | 44 always-on + 5 incremental | — | — | — | — |
 | Incremental / change-tracking mode | Yes | — | — | — | — |
 | Price history per listing | Yes | — | — | — | — |
 | No authentication required | Yes | — | — | — | — |
@@ -154,6 +155,19 @@ Brazil is explicitly excluded from this actor. The olx.com.br platform requires 
 
 Set `sellerType` to `"business"` to see only dealer listings instead.
 
+### Filter out damaged listings
+
+```json
+{
+  "country": "ro",
+  "brands": ["BMW"],
+  "excludeDamaged": true,
+  "maxItems": 100
+}
+```
+
+Sets `excludeDamaged: true` to drop listings where OLX flags the vehicle as damaged or accident-repaired. Works on RO, PL, PT, UA, and KZ. For BG, where OLX does not expose a damage flag, the filter is silently skipped. If you expect a significant share of damaged listings, increase `maxItems` to compensate -- see the Limitations section.
+
 ### Enumerate more than 1,000 listings
 
 ```json
@@ -179,6 +193,8 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 | `priceFrom` / `priceTo` | integer | NO | -- | Price range in `priceCurrency` |
 | `priceCurrency` | enum | NO | `"EUR"` | `EUR, RON, PLN, UAH, USD, BGN, KZT` |
 | `sellerType` | enum | NO | `"any"` | Filter listings by seller type: `"any"` (default, no filter), `"private"` (private sellers only), `"business"` (dealers/businesses only). Applies in both structured-filter and `startUrls` modes. In `startUrls` mode, an existing `filter_enum_business` value in the URL takes precedence and `sellerType` has no effect. |
+| `excludeDamaged` | boolean | NO | `false` | Drop listings flagged as damaged or needs-repairs. Applies on RO/PL/PT/UA/KZ; ignored on BG (no API signal). See the History filter support matrix below. |
+| `firstOwnerOnly` | boolean | NO | `false` | Keep only listings flagged as first owner. Applies on BG/UA/KZ; ignored on RO/PL/PT (no API signal). See the History filter support matrix below. |
 | `sortBy` | enum | NO | `"created_at:desc"` | `created_at:desc, filter_float_price:asc, filter_float_price:desc, relevance` |
 | `maxItems` | integer | NO | `1000` | Hard ceiling. OLX caps single queries at 1,000; `> 1000` triggers auto brand x year x price slicing |
 | `incrementalMode` | boolean | NO | `false` | Enable change tracking across runs. See Incremental Monitoring section. |
@@ -189,6 +205,17 @@ When `maxItems > 1000`, the actor automatically slices by brand and year band to
 **Input mode precedence:** `startUrls` wins when provided. All structured filters (`country`, `brands`, `query`, `yearFrom`, `yearTo`, `priceFrom`, `priceTo`, `priceCurrency`) are ignored when `startUrls` is set. Only `maxItems` and `sortBy` apply alongside `startUrls`. A warning is logged if structured filters are set alongside `startUrls`.
 
 **Currency note:** `priceCurrency` must match the listing currency on OLX for the price filter to be effective. EUR is the most interoperable choice across all supported countries. Polish listings are denominated in PLN; Ukrainian listings are typically in USD or UAH; Kazakhstani listings are in KZT.
+
+### History filter support per country
+
+|  | RO | PL | BG | PT | UA | KZ |
+|---|---|---|---|---|---|---|
+| `excludeDamaged` | ✅ | ✅ | ⚠️ no signal | ✅ | ✅ | ✅ |
+| `firstOwnerOnly` | ❌ no signal | ❌ no signal | ✅ | ❌ no signal | ✅ | ✅ via `ownersCount` |
+
+Cells marked ❌ or ⚠️ mean OLX does not expose the relevant flag on that country's API. When you set such a filter for an unsupported country, the actor logs an INFO line once per run and the filter is silently skipped — no listings are dropped and no error is raised. Runs proceed normally.
+
+`serviceBookOnly` is tracked in [#51](https://github.com/web-crawling/apify-olx-cars/issues/51) as a future addition (currently confirmed on olx.bg only; deferred until OLX exposes the signal on more countries).
 
 ## Output Data
 
@@ -217,6 +244,7 @@ Every output item is a JSON object. Most fields are always present -- fields wit
   "transmission": "automatic",
   "bodyType": "suv",
   "condition": "used",
+  "conditionRaw": "first-owner",
   "engineCapacityCm3": 1998,
   "powerHp": 190,
   "color": "black",
@@ -301,6 +329,7 @@ Every output item is a JSON object. Most fields are always present -- fields wit
 | `transmission` | string | YES | Normalised: `manual`, `automatic`, `semi-automatic`, `other` |
 | `bodyType` | string | YES | Normalised: `sedan`, `suv`, `hatchback`, `estate`, `coupe`, `convertible`, `pickup`, `mpv`, `other`. Effectively always `"other"` for BG -- see Limitations. |
 | `condition` | string | YES | Normalised: `used`, `new`, `damaged` |
+| `conditionRaw` | string | YES | Raw OLX condition slug before normalisation. Scalar on RO/PL/BG/PT/KZ (e.g. `"first-owner"`, `"service-book"`, `"damaged"`, `"used"`); on UA where OLX returns multiple slugs, they are joined with `;` (e.g. `"first-owner;after-accident"`). Absent when the listing has no condition param. Useful when the canonical `condition` field's normalisation (e.g. `first-owner` → `used`) loses information you need. |
 | `engineCapacityCm3` | integer | YES | Engine displacement in cm3 (UA normalised from litres; KZ data quality warning -- see Limitations) |
 | `powerHp` | integer | YES | Engine power in HP |
 | `color` | string | YES | English color slug |
@@ -589,6 +618,8 @@ If you need a heuristic body-type classification for BG listings, read the `para
 
 **Fair-price rating coverage depends on listing density.** The `priceVsMedianPct` and `priceRating` fields are computed within each run by bucketing listings on make, model, 5-year year-band, 50,000 km mileage-band, and currency. A bucket must contain at least 5 listings before any item in it receives a rating. In typical single-country single-brand runs, ~40 % of items receive a rating; broader runs (parent cars category, multi-brand) push this higher. Niche models, rare brands on small markets, or runs with fewer than ~20–30 total items may still return few or no rated items. The rating reflects current within-run prices only, not a historical OLX market median.
 
+**History filters drop items client-side and may produce fewer than `maxItems` items.** The `excludeDamaged` and `firstOwnerOnly` filters work by inspecting each listing's raw condition slug after fetching from OLX (no API-level filter is available). Listings are dropped at pipeline priority 150, which fires AFTER the `maxItems` cap at priority 100. As a result, a run with `maxItems: 100` plus `excludeDamaged: true` may yield fewer than 100 output items if some fetched listings were filtered out. To compensate, increase `maxItems` by ~10–30% over your target sample size when using these filters. For example: set `maxItems: 130` to typically land near 100 output items when around 20–25% of listings in your query are damaged.
+
 **`MISSING` incremental items do not receive fair-price fields.** When `emitMissing: true`, items emitted with `changeType: MISSING` come from the prior-run snapshot and may have stale prices. `priceVsMedianPct` and `priceRating` are intentionally absent for MISSING items to avoid comparing stale snapshot prices against the current run's median.
 
 **`extraAttributes` values are in the listing language.** The `extraAttributes` dict passes through OLX param labels as-is: Romanian on olx.ro, Polish on olx.pl, Bulgarian Cyrillic on olx.bg, etc. These are not normalised to English. For the normalised versions of fuel type, transmission, and body type, use the top-level `fuelType`, `transmission`, and `bodyType` fields instead.
@@ -598,7 +629,7 @@ If you need a heuristic body-type classification for BG listings, read the `para
 ## Frequently Asked Questions
 
 **What is the OLX Car Listings Scraper?**
-The OLX Car Listings Scraper is an Apify actor that extracts car and vehicle listings from OLX classifieds sites in Romania, Poland, Bulgaria, Portugal, Ukraine, and Kazakhstan. It returns structured JSON with 43 always-on fields per listing including price, make, model, year, mileage, fuel type, seller info, and location. An additional 5 fields are added when `incrementalMode: true`.
+The OLX Car Listings Scraper is an Apify actor that extracts car and vehicle listings from OLX classifieds sites in Romania, Poland, Bulgaria, Portugal, Ukraine, and Kazakhstan. It returns structured JSON with 44 always-on fields per listing including price, make, model, year, mileage, fuel type, seller info, and location. An additional 5 fields are added when `incrementalMode: true`.
 
 **Which OLX country sites does this actor support?**
 Romania (olx.ro), Poland (olx.pl), Bulgaria (olx.bg), Portugal (olx.pt), Ukraine (olx.ua), and Kazakhstan (olx.kz). Pass the `country` parameter to select a country, or use `startUrls` to provide a direct OLX URL -- the country is inferred from the domain automatically.
@@ -607,7 +638,7 @@ Romania (olx.ro), Poland (olx.pl), Bulgaria (olx.bg), Portugal (olx.pt), Ukraine
 No. Brazil is not in v1. The olx.com.br platform uses a different technical stack with Cloudflare TLS-fingerprint blocking that requires Playwright and residential proxy -- a dedicated actor is planned for the roadmap.
 
 **What car data does the actor extract?**
-The actor returns 43 always-on fields grouped into: identification (offerId, url, title, description), pricing (price, currency, priceNegotiable, pricePrevious, priceConverted), vehicle specs (make, model, year, mileageKm, fuelType, transmission, bodyType, condition, engineCapacityCm3, powerHp, color, vin, features), country-specific fields (drivetrain, steeringWheelSide, doorCount, seatCount, registrationStatus, co2Emissions, etc.), seller info, location with GPS, photos, timestamps, and a `paramsRaw` pass-through of all raw API parameters.
+The actor returns 44 always-on fields grouped into: identification (offerId, url, title, description), pricing (price, currency, priceNegotiable, pricePrevious, priceConverted), vehicle specs (make, model, year, mileageKm, fuelType, transmission, bodyType, condition, conditionRaw, engineCapacityCm3, powerHp, color, vin, features), country-specific fields (drivetrain, steeringWheelSide, doorCount, seatCount, registrationStatus, co2Emissions, etc.), seller info, location with GPS, photos, timestamps, and a `paramsRaw` pass-through of all raw API parameters.
 
 **Does this actor return seller phone numbers?**
 No. The actor returns `seller.hasPhone` as a boolean only -- `true` means the seller accepts phone contact, but the phone number itself is not extracted in v1. Retrieving the phone number requires a separate authenticated API call.
@@ -638,6 +669,12 @@ The actor returns 40-65 listings per API call. Concurrency per domain ranges fro
 
 **Why was Romania chosen as the default country?**
 Romania has the highest car-listing volume among the supported countries (approximately 128,000 active listings) and EUR pricing is common in RO, which makes it easy to compare prices across European markets without currency conversion. `"ro"` as the default also means the quickest path to a working first run for most users.
+
+**Why am I getting fewer items than `maxItems` when I use `excludeDamaged` or `firstOwnerOnly`?**
+These filters are client-side post-filters -- they drop items after the `maxItems` cap is enforced. If you ask for 100 items and 20% are damaged, you will receive approximately 80 output items. Increase `maxItems` to compensate, for example set `maxItems: 130` to typically land near 100 items after filtering. The actor does not raise an error in this situation; it simply outputs fewer items than requested.
+
+**Why does `firstOwnerOnly` only work on some countries?**
+OLX exposes a first-owner flag on three of the six supported countries (BG, UA, KZ). The other three (RO, PL, PT) do not surface ownership history in their API responses. When you set `firstOwnerOnly: true` for an unsupported country, the actor logs an INFO message once per run and proceeds without filtering -- no listings are dropped and the run succeeds normally. See the History filter support matrix in the Input Parameters section for the full breakdown.
 
 **Why are `priceVsMedianPct` and `priceRating` absent from my output?**
 These fields require at least 5 listings in the same bucket (same make, model, 5-year year-band, 50,000 km mileage-band, and currency) within a single run. As of v0.6.0, typical single-country single-brand runs (e.g. BMW in Romania or Poland) rate roughly 40 % of items; broader runs (omit the `brands` filter or include multiple brands) push this higher. Very narrow queries -- a single niche model, a rare brand on a small market, or runs with fewer than ~20–30 total items -- may still return few or no rated items. The fields are also absent for `MISSING` incremental items and for listings where price is undisclosed.

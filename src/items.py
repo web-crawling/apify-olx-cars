@@ -91,3 +91,6 @@ class CarItem(scrapy.Item):
     # --- Fair-price computed fields (#18) -------------------------------------
     priceVsMedianPct = scrapy.Field()    # float|None: % deviation from bucket median; TakeFirst()
     priceRating = scrapy.Field()         # str|None: very_good/good/fair/high/very_high; TakeFirst()
+
+    # --- Raw condition slug(s) before normalisation (#23) ---------------------
+    conditionRaw = scrapy.Field()  # str | list[str] | None; Identity() output processor

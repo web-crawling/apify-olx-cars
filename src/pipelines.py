@@ -5,6 +5,12 @@ Pipelines:
     Raises CloseSpider when the limit is reached, which signals Scrapy to
     shut down cleanly and lets Apify report SUCCEEDED with the items collected.
 
+  HistoryFilterPipeline — client-side post-filter for excludeDamaged and
+    firstOwnerOnly inputs. Runs at priority 150 (after MaxItemsPipeline at 100,
+    before IncrementalDiffPipeline at 200). Raises DropItem for filtered listings
+    so they never enter the incremental snapshot. On countries where a filter
+    has no API signal, emits a one-time INFO log per (filter, country) pair.
+
   IncrementalDiffPipeline — diffs each item against the KV snapshot loaded
     by main.py, attaches changeType/firstSeenAt/lastSeenAt, deduplicates
     by offerId within a run, and drops UNCHANGED items when emitUnchanged
@@ -58,6 +64,121 @@ class MaxItemsPipeline:
                 f'maxItems={self.max_items} reached — stopping spider.'
             )
         return item
+
+
+class HistoryFilterPipeline:
+    """Client-side post-filter for excludeDamaged and firstOwnerOnly inputs.
+
+    Pipeline priority: 150 — after MaxItemsPipeline (100), before
+    IncrementalDiffPipeline (200). Filtered items are DropItem'd so they
+    never enter the incremental snapshot, never reach FairPrice/DropNones/Apify.
+
+    On countries where a filter has no OLX API signal, the filter is a no-op
+    and a single INFO log is emitted per (filter_name, country) pair per run.
+    The log is gated by a class-level set so it fires exactly once — not once
+    per item (which would flood the log at maxItems=1000).
+
+    Per-country support:
+      excludeDamaged: ro, pl, pt, ua, kz — uses normalised item['condition']
+      firstOwnerOnly: bg, ua, kz — uses conditionRaw (bg/ua) or ownersCount (kz)
+      BG is excluded from excludeDamaged (no damage flag in BG condition enum).
+    """
+
+    # Per-filter supported country sets (client-side signal confirmed)
+    _DAMAGED_COUNTRIES: frozenset = frozenset({'ro', 'pl', 'pt', 'ua', 'kz'})
+    _FIRST_OWNER_COUNTRIES: frozenset = frozenset({'bg', 'ua', 'kz'})
+
+    # Class-level set of (filter_name, country) cells already logged as inapplicable.
+    # Class attribute (not instance) so main.py can reset it before each run.
+    _logged_inapplicable: set = set()
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset per-run class-level state. Called from open_spider and main.py."""
+        cls._logged_inapplicable = set()
+
+    def open_spider(self, spider) -> None:
+        type(self).reset()
+        input_data = spider.settings.get('INPUT_DATA') or {}
+        self._exclude_damaged: bool = bool(input_data.get('excludeDamaged', False))
+        self._first_owner_only: bool = bool(input_data.get('firstOwnerOnly', False))
+        if self._exclude_damaged or self._first_owner_only:
+            logger.info(
+                'HistoryFilterPipeline: excludeDamaged=%s firstOwnerOnly=%s',
+                self._exclude_damaged, self._first_owner_only,
+            )
+
+    def process_item(self, item, spider):
+        if not (self._exclude_damaged or self._first_owner_only):
+            return item
+
+        d = item if isinstance(item, dict) else ItemAdapter(item).asdict()
+        country = str(d.get('country') or '').lower()
+
+        # --- excludeDamaged ---------------------------------------------------
+        if self._exclude_damaged:
+            if country in self._DAMAGED_COUNTRIES:
+                if self._is_damaged(d):
+                    raise DropItem(f'HistoryFilter: excludeDamaged — offerId {d.get("offerId")}')
+            else:
+                self._log_once(spider, 'excludeDamaged', country)
+
+        # --- firstOwnerOnly ---------------------------------------------------
+        if self._first_owner_only:
+            if country in self._FIRST_OWNER_COUNTRIES:
+                if not self._is_first_owner(d, country):
+                    raise DropItem(f'HistoryFilter: firstOwnerOnly — offerId {d.get("offerId")}')
+            else:
+                self._log_once(spider, 'firstOwnerOnly', country)
+
+        return item
+
+    @staticmethod
+    def _is_damaged(d: dict) -> bool:
+        """Return True when the listing is flagged as damaged (normalised condition)."""
+        return d.get('condition') == 'damaged'
+
+    @staticmethod
+    def _is_first_owner(d: dict, country: str) -> bool:
+        """Return True when the listing is a first-owner vehicle.
+
+        KZ: ownersCount == 1 (int or str coerced).
+        BG/UA: conditionRaw contains 'first-owner'. conditionRaw is always a
+        str (never list) — UA multi-element arrays are ';'-joined by the spider
+        before the item is emitted (e.g. "first-owner;after-accident").
+        Missing conditionRaw: condition unknown — pass through (false negative
+        preferred over false positive drop). See risk R2 in architecture doc.
+        """
+        if country == 'kz':
+            try:
+                return int(d.get('ownersCount') or 0) == 1
+            except (TypeError, ValueError):
+                return False
+
+        # BG/UA — conditionRaw is always a str; UA slugs are ';'-separated
+        cr = d.get('conditionRaw')
+        if cr is None:
+            # No condition data: unknown — pass through rather than false-positive drop
+            return True
+        if not isinstance(cr, str):
+            # Defensive — should not happen with current spider, but pass through
+            return False
+        # Split on ';' to handle UA joined arrays; non-UA values won't contain ';'
+        parts = {p.strip() for p in cr.split(';')}
+        return 'first-owner' in parts
+
+    @classmethod
+    def _log_once(cls, spider, filter_name: str, country: str) -> None:
+        """Emit a one-time INFO log for an inapplicable (filter, country) cell."""
+        key = (filter_name, country)
+        if key in cls._logged_inapplicable:
+            return
+        cls._logged_inapplicable.add(key)
+        spider.logger.info(
+            "HistoryFilter: filter %r is not available on country %r "
+            "(no OLX API signal). Items pass through unchanged for this country.",
+            filter_name, country,
+        )
 
 
 def _drop_nones(obj):

@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.7.0 — 2026-05-18
+
+### Added
+- **`excludeDamaged` input** (boolean, default `false`) — drops listings with raw condition
+  `damaged` or equivalent. Applies on RO/PL/PT/UA/KZ; ignored on BG (no API signal) with
+  a one-time INFO log per run.
+- **`firstOwnerOnly` input** (boolean, default `false`) — keeps only listings flagged as
+  first-owner. Applies on BG/UA/KZ (BG/UA via raw condition slug, KZ via `ownersCount == 1`);
+  ignored on RO/PL/PT (no API signal) with a one-time INFO log per run.
+- **`conditionRaw` output field** — raw OLX condition slug before normalisation
+  (e.g. `"first-owner"`, `"service-book"`, `"damaged"`). Always a string: scalar on
+  RO/PL/BG/PT/KZ; on UA where OLX returns an array, slugs are joined with `;`
+  (e.g. `"first-owner;after-accident"`). Absent when the listing carries no condition param.
+- **`serviceBookOnly` deferred** — research found the service-book signal exists on
+  olx.bg only; deferred to [issue #51](https://github.com/web-crawling/apify-olx-cars/issues/51)
+  for a future revisit if/when OLX exposes the field on more countries.
+
+### Notes
+- Filters are applied client-side after fetching (OLX's API has no server-side filter for
+  any of these flags). The `maxItems` cap is enforced BEFORE filtering
+  (`MaxItemsPipeline` at priority 100, `HistoryFilterPipeline` at priority 150), so runs
+  with active filters may yield fewer items than `maxItems` requests.
+- In incremental mode, filtered items never enter the snapshot (`HistoryFilterPipeline`
+  at priority 150 fires before `IncrementalDiffPipeline` at priority 200).
+
 ## v0.6.0 — 2026-05-17
 
 ### Changed

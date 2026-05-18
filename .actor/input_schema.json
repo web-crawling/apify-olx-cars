@@ -89,6 +89,18 @@
 			"default": "any",
 			"description": "Filter listings by seller type. 'Private' returns individual sellers only (filter_enum_business:0); 'Business' returns dealers only (filter_enum_business:1); 'Any' applies no filter. Applies in both structured-filter mode and startUrls mode. Universal across all 6 supported countries."
 		},
+		"excludeDamaged": {
+			"title": "Exclude Damaged",
+			"type": "boolean",
+			"default": false,
+			"description": "Drop listings flagged as damaged / requires-repairs. Applied client-side after fetching. Supported on: RO, PL, PT, UA, KZ. Not applicable on BG (no damage flag in BG condition enum) — BG listings pass through unchanged and a one-time INFO log is emitted. When true and the active country lacks the filter, the run proceeds as if the parameter were false."
+		},
+		"firstOwnerOnly": {
+			"title": "First Owner Only",
+			"type": "boolean",
+			"default": false,
+			"description": "Keep only listings with first owner. Applied client-side after fetching. Supported on: BG (technical_condition == 'first-owner'), UA (condition array contains 'first-owner'), KZ (ownersCount == 1). Not applicable on RO, PL, PT (no first-owner field in their OLX params) — listings on these countries pass through unchanged and a one-time INFO log is emitted. When true and the active country lacks the filter, the run proceeds as if the parameter were false."
+		},
 		"sortBy": {
 			"title": "Sort Order",
 			"type": "string",

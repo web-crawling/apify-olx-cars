@@ -10,8 +10,9 @@
   `startUrls` is provided. Default `false` preserves existing behaviour exactly.
   Closes [#14](https://github.com/web-crawling/apify-olx-cars/issues/14).
 
-- **`pageLimit` input** (integer 1-65, default `50`) -- listings requested per OLX API call.
-  Raise to 65 to cut API request count by ~30% at the same `maxItems`. Default 50 is unchanged.
+- **`pageLimit` input** (integer 1-50, default `50`) -- listings requested per OLX API call.
+  Lower values produce finer per-page progress logs at the cost of more requests. OLX's
+  cars endpoint rejects values above 50 with HTTP 400. Default 50 is unchanged.
 
 - **`sliceYearStep` input** (integer 1-50, default `5`) -- year-band width when auto-slicing
   broad result sets (only active when `maxItems > 1000`). Smaller = more, narrower slices.

@@ -176,11 +176,11 @@ async def main() -> None:
         page_limit_raw = actor_input.get('pageLimit', 50)
         try:
             page_limit = int(page_limit_raw)
-            if not (1 <= page_limit <= 65):
+            if not (1 <= page_limit <= 50):
                 Actor.log.warning(
-                    'pageLimit %r out of range [1,65] — clamping.', page_limit_raw,
+                    'pageLimit %r out of range [1,50] — clamping.', page_limit_raw,
                 )
-                page_limit = max(1, min(65, page_limit))
+                page_limit = max(1, min(50, page_limit))
         except (TypeError, ValueError):
             Actor.log.warning(
                 'Invalid pageLimit %r — defaulting to 50.', page_limit_raw,

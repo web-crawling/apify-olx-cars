@@ -676,6 +676,7 @@ The digest is a single JSON object. Below is an abbreviated example:
 ```
 
 **Key fields:**
+- `counts` — totals by `changeType`. **Note:** counts reflect items that reach the notification pipeline AFTER the incremental diff stage. UNCHANGED items are dropped before reaching the pipeline unless `emitUnchanged: true` is set, so `counts.unchanged` and `counts.total` will be 0 on warm runs with no `emitUnchanged`. NEW, UPDATED, and REAPPEARED counts are always accurate. MISSING is counted when `emitMissing: true`.
 - `counts.priceDropsQualified` — total UPDATED items that passed the `notifyMinPriceDropPct` threshold, regardless of `notifyTopN` truncation.
 - `newItems` — up to `notifyTopN` items sorted by most-recent `firstSeenAt`. Each entry carries: `offerId, url, title, price, currency, year, mileageKm, make, model, firstSeenAt`.
 - `priceDrops` — up to `notifyTopN` items sorted by highest `priceDropPct`. Each entry carries: `offerId, url, title, priceCurrent, pricePrevious, priceDropPct, currency`. Items with an undisclosed price are excluded.

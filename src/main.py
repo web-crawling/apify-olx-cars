@@ -17,6 +17,7 @@ CRITICAL — crawl_failed pattern:
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 
 from apify import Actor
@@ -116,7 +117,13 @@ async def main() -> None:
                     'Enable Incremental Mode or set notifyOn to "none".'
                 )
             )
-            return
+            # In Scrapy-based actors, apify SDK detects Scrapy and disables
+            # sys.exit() in its __aexit__ (see apify/_actor.py:_get_default_exit_process).
+            # `Actor.fail()` then only sets statusMessage; the container still
+            # exits with code 0 and Apify reports SUCCEEDED. To actually surface
+            # this misconfiguration as FAILED, we sys.exit(1) here. Safe at this
+            # point — no Twisted reactor running yet (this is a pre-crawl check).
+            sys.exit(1)
 
         notify_min_pct_raw = actor_input.get('notifyMinPriceDropPct', 5)
         try:

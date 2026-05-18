@@ -414,6 +414,14 @@ UA_COLOR_MAP: dict[str, str] = {
     "22": "other",      # Рожевий (pink — not in canonical vocabulary)
     "24": "purple",     # Фіолетовий (violet)
     "25": "other",      # Хамелеон (chameleon/colour-shifting paint)
+    # Text-slug fallbacks (issue #63). OLX UA's API occasionally returns text
+    # slugs instead of numeric ids for the color param. Without these entries
+    # they pass through `UA_COLOR_MAP.get(color_str, color_str)` unchanged and
+    # reach the dataset as non-canonical values.
+    "grey": "gray",           # British spelling → canonical US spelling
+    "light_blue": "blue",     # no canonical light_blue → blue family
+    "multicolor": "other",    # not in canonical vocabulary
+    "pixel": "other",         # data-quality artefact (not a real colour)
 }
 
 KZ_COLOR_MAP: dict[str, str] = {
@@ -443,4 +451,12 @@ KZ_COLOR_MAP: dict[str, str] = {
     "23": "other",      # Сафари (safari/khaki — not in canonical vocabulary)
     "24": "purple",     # Фиолетовый (violet)
     "25": "other",      # Хамелеон (chameleon/colour-shifting paint)
+    # Text-slug fallbacks (issue #63). Mirrored from UA_COLOR_MAP for safety —
+    # KZ was not observed returning these slugs in the PR #62 sample, but the
+    # API surface is identical to UA and may return text slugs in future
+    # samples. Cheap defensive coverage.
+    "grey": "gray",           # British spelling → canonical US spelling
+    "light_blue": "blue",     # no canonical light_blue → blue family
+    "multicolor": "other",    # not in canonical vocabulary
+    "pixel": "other",         # data-quality artefact (not a real colour)
 }

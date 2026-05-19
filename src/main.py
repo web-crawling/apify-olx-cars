@@ -574,3 +574,10 @@ async def main() -> None:
                     'Please check the actor logs for details.'
                 )
             )
+            # In Scrapy-based actors, apify SDK detects Scrapy and disables
+            # sys.exit() in its __aexit__. Without the explicit sys.exit(1)
+            # below, the container exits with code 0 and Apify reports the
+            # run as SUCCEEDED (with 0 items) even though crawl_failed was
+            # set. Twisted reactor is already torn down here, so the call
+            # is safe. (issue #72)
+            sys.exit(1)

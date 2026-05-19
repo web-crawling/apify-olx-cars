@@ -93,7 +93,7 @@
 			"enum": ["any", "private", "business"],
 			"enumTitles": ["Any seller", "Private seller only", "Business / dealer only"],
 			"default": "any",
-			"description": "Filter listings by seller type. 'Private' returns individual sellers only (filter_enum_business:0); 'Business' returns dealers only (filter_enum_business:1); 'Any' applies no filter. Applies in both structured-filter mode and startUrls mode. Universal across all 6 supported countries."
+			"description": "Filter listings by seller type. 'Private' returns individual sellers only (owner_type=private); 'Business' returns dealers only (owner_type=business); 'Any' applies no filter. Applies in both structured-filter mode and startUrls mode. Universal across all 6 supported countries."
 		},
 		"excludeDamaged": {
 			"title": "Exclude Damaged",

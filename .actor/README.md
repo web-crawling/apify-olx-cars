@@ -295,7 +295,7 @@ Adds `vinDecoded` sub-objects to listings that carry a valid 17-character VIN. P
 | `yearFrom` / `yearTo` | integer | NO | -- | Manufacture year range (1900-2099) |
 | `priceFrom` / `priceTo` | integer | NO | -- | Price range in `priceCurrency` |
 | `priceCurrency` | enum | NO | `"EUR"` | `EUR, RON, PLN, UAH, USD, BGN, KZT` |
-| `sellerType` | enum | NO | `"any"` | Filter listings by seller type: `"any"` (default, no filter), `"private"` (private sellers only), `"business"` (dealers/businesses only). Applies in both structured-filter and `startUrls` modes. In `startUrls` mode, an existing `filter_enum_business` value in the URL takes precedence and `sellerType` has no effect. |
+| `sellerType` | enum | NO | `"any"` | Filter listings by seller type: `"any"` (default, no filter), `"private"` (private sellers only), `"business"` (dealers/businesses only). Applies in both structured-filter and `startUrls` modes. In `startUrls` mode, an existing `owner_type` value in the URL takes precedence and `sellerType` has no effect. |
 | `excludeDamaged` | boolean | NO | `false` | Drop listings flagged as damaged or needs-repairs. Applies on RO/PL/PT/UA/KZ; ignored on BG (no API signal). See the History filter support matrix below. |
 | `firstOwnerOnly` | boolean | NO | `false` | Keep only listings flagged as first owner. Applies on BG/UA/KZ; ignored on RO/PL/PT (no API signal). See the History filter support matrix below. |
 | `serviceBookOnly` | boolean | NO | `false` | Keep only listings with a stamped service book. Applies on BG; ignored on RO/PL/PT/UA/KZ (no API signal). See the History filter support matrix below. |

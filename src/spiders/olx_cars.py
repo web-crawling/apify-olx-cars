@@ -471,19 +471,23 @@ class OlxCarsSpider(scrapy.Spider):
                     category_id = CARS_CATEGORY_ID[detected_country]
                     base_params['category_id'] = category_id
 
-                # Seller type filter (#22): inject only when not already in URL params
-                if 'filter_enum_business' not in base_params:
+                # Seller type filter (#22): inject only when not already in URL params.
+                # OLX API param is `owner_type` with string values 'private'/'business';
+                # the legacy `filter_enum_business=0/1` shape is rejected with HTTP 400
+                # "Dynamic filters not applicable for category N: filter_enum_business"
+                # on every cat (issue #72).
+                if 'owner_type' not in base_params:
                     if seller_type == 'private':
-                        base_params['filter_enum_business'] = 0
+                        base_params['owner_type'] = 'private'
                         logger.info(
-                            'sellerType=%s filter active, appending filter_enum_business=%s',
-                            seller_type, 0,
+                            'sellerType=%s filter active, appending owner_type=%s',
+                            seller_type, 'private',
                         )
                     elif seller_type == 'business':
-                        base_params['filter_enum_business'] = 1
+                        base_params['owner_type'] = 'business'
                         logger.info(
-                            'sellerType=%s filter active, appending filter_enum_business=%s',
-                            seller_type, 1,
+                            'sellerType=%s filter active, appending owner_type=%s',
+                            seller_type, 'business',
                         )
                 # 'any': no filter added; URL-provided value: not overridden
 
@@ -583,18 +587,20 @@ class OlxCarsSpider(scrapy.Spider):
                 price_from, price_to, price_currency,
             )
 
-        # Seller type filter (#22)
+        # Seller type filter (#22). OLX API param is `owner_type` with string
+        # values 'private'/'business'; the legacy `filter_enum_business=0/1`
+        # shape is rejected with HTTP 400 (issue #72).
         if seller_type == 'private':
-            base_params['filter_enum_business'] = 0
+            base_params['owner_type'] = 'private'
             logger.info(
-                'sellerType=%s filter active, appending filter_enum_business=%s',
-                seller_type, 0,
+                'sellerType=%s filter active, appending owner_type=%s',
+                seller_type, 'private',
             )
         elif seller_type == 'business':
-            base_params['filter_enum_business'] = 1
+            base_params['owner_type'] = 'business'
             logger.info(
-                'sellerType=%s filter active, appending filter_enum_business=%s',
-                seller_type, 1,
+                'sellerType=%s filter active, appending owner_type=%s',
+                seller_type, 'business',
             )
         # 'any': no filter added
 

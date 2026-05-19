@@ -90,6 +90,37 @@ async def main() -> None:
             len(start_urls_raw), len(brands_raw),
         )
 
+        # --- Mode conflict warning (#74) ---
+        # The precedence rule (documented in README and the schema description)
+        # is that startUrls takes priority — when it is non-empty, the
+        # structured filters (brands, query, year/price ranges, filterByCurrency)
+        # are silently ignored. Users who keep the prefill default and add a
+        # brand on top see "broken" results because their filters never run.
+        # Log a clear WARNING listing the ignored fields so the user can see
+        # exactly what was discarded from the platform run log.
+        if start_urls_raw:
+            ignored: list[str] = []
+            if brands_raw:
+                ignored.append(f'brands={brands_raw!r}')
+            if actor_input.get('query'):
+                ignored.append(f"query={actor_input['query']!r}")
+            if actor_input.get('yearFrom') is not None:
+                ignored.append(f"yearFrom={actor_input['yearFrom']}")
+            if actor_input.get('yearTo') is not None:
+                ignored.append(f"yearTo={actor_input['yearTo']}")
+            if actor_input.get('priceFrom') is not None:
+                ignored.append(f"priceFrom={actor_input['priceFrom']}")
+            if actor_input.get('priceTo') is not None:
+                ignored.append(f"priceTo={actor_input['priceTo']}")
+            if bool(actor_input.get('filterByCurrency', False)):
+                ignored.append('filterByCurrency=true')
+            if ignored:
+                Actor.log.warning(
+                    'Start URLs are set, so structured filters are ignored: %s. '
+                    'To use those filters, clear Start URLs in the input.',
+                    ', '.join(ignored),
+                )
+
         # --- Build Scrapy settings ---
         settings = apply_apify_settings()
 

@@ -288,7 +288,7 @@ Adds `vinDecoded` sub-objects to listings that carry a valid 17-character VIN. P
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `startUrls` | array | NO | -- | OLX listing/search URLs. When set, structured filters are ignored (except `maxItems`, `sortBy`). Country auto-inferred from URL. Prefill: `[{"url": "https://www.olx.ro/auto-masini-moto-ambarcatiuni/autoturisme/"}]` (object form, NOT plain string) |
+| `startUrls` | array | NO | `[]` (empty) | Optional. OLX listing/search URLs to paginate directly. When set, structured filters (country, brands, query, year/price ranges, filterByCurrency) are ignored — only `maxItems`, `sortBy`, `sellerType`, `excludeDamaged`, `firstOwnerOnly`, `serviceBookOnly` still apply. Country auto-inferred from URL. Leave empty (the default) to use the structured filters. Entries must be objects of the form `{ "url": "..." }`, not plain strings. |
 | `country` | enum | NO | `"ro"` | One of `ro, pl, bg, pt, ua, kz`. **No `br`** in v1 |
 | `brands` | array | NO | `[]` (all) | Free-text brand names. Resolved at runtime via bundled `brand_categories.json` per country |
 | `query` | string | NO | -- | Free-text keyword search |
@@ -313,7 +313,7 @@ Adds `vinDecoded` sub-objects to listings that carry a valid 17-character VIN. P
 | `notifyTopN` | integer (1-200) | NO | `20` | Maximum number of items in each section (`newItems`, `priceDrops`) of the digest payload. Items are ranked by most-recent `firstSeenAt` (new listings) or highest `priceDropPct` (price drops). Values outside 1-200 are clamped with a WARNING. |
 | `notifyWebhookUrl` | string | NO | `""` | Optional HTTPS URL to POST the digest JSON to at run end. Leave empty to disable outbound HTTP. When set, the actor performs a single `Content-Type: application/json` POST. Supports Slack incoming webhooks, Discord webhooks, and any generic HTTP endpoint. POST failure is non-fatal (WARNING only; scrape results are already saved). Keep this URL private -- it is stored in run input history. |
 
-**Input mode precedence:** `startUrls` wins when provided. All structured filters (`country`, `brands`, `query`, `yearFrom`, `yearTo`, `priceFrom`, `priceTo`, `priceCurrency`) are ignored when `startUrls` is set. Only `maxItems` and `sortBy` apply alongside `startUrls`. A warning is logged if structured filters are set alongside `startUrls`.
+**Input mode precedence:** `startUrls` wins when provided. The structured filters `country`, `brands`, `query`, `yearFrom`, `yearTo`, `priceFrom`, `priceTo`, `priceCurrency`, and `filterByCurrency` are ignored when `startUrls` is set. `maxItems`, `sortBy`, `sellerType`, `excludeDamaged`, `firstOwnerOnly`, and `serviceBookOnly` apply in both modes. To use the structured filters, leave `startUrls` empty. If both are populated, the actor logs a `WARNING` at the start of the run listing exactly which structured fields were discarded.
 
 **Currency note:** `priceCurrency` must match the listing currency on OLX for the price filter to be effective. EUR is the most interoperable choice across all supported countries. Polish listings are denominated in PLN; Ukrainian listings are typically in USD or UAH; Kazakhstani listings are in KZT.
 

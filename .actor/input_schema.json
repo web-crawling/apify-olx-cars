@@ -8,12 +8,10 @@
 			"title": "Start URLs",
 			"type": "array",
 			"editor": "requestListSources",
-			"description": "OLX car listing or search result URLs to scrape directly. When provided, structured filters (country, brands, yearFrom, yearTo, priceFrom, priceTo, query) are ignored — only maxItems and sortBy apply. Country is auto-inferred from the URL domain. Accepts any OLX car search or category URL.",
+			"description": "Leave empty (default) to use the structured filters below — that is the right path for most users. Paste OLX car listing or search URLs here only when you already have a fully filtered page on OLX (e.g. a model-specific URL like '.../audi/q5/' or a saved search) and want to paginate it directly. When set, the structured filters below (country, brands, query, yearFrom, yearTo, priceFrom, priceTo, filterByCurrency) are ignored — only maxItems, sortBy, sellerType, excludeDamaged, firstOwnerOnly, and serviceBookOnly still apply. Country is auto-inferred from the URL domain.",
 			"sectionCaption": "Input Mode",
-			"sectionDescription": "Provide either URLs (startUrls) OR structured filters below. URLs take priority.",
-			"prefill": [
-				{ "url": "https://www.olx.ro/auto-masini-moto-ambarcatiuni/autoturisme/" }
-			]
+			"sectionDescription": "Choose one input mode: leave Start URLs empty to use the structured filters below (default), or paste OLX URLs to paginate them directly.",
+			"prefill": []
 		},
 		"country": {
 			"title": "Country",

@@ -8,7 +8,7 @@
 			"title": "Start URLs",
 			"type": "array",
 			"editor": "requestListSources",
-			"description": "Optional. Paste one or more OLX car listing or search result URLs to paginate them directly (e.g. a model-specific page like '.../audi/q5/' or a fully filtered search URL). When set, the structured filters below (country, brands, query, yearFrom, yearTo, priceFrom, priceTo, filterByCurrency) are ignored — only maxItems, sortBy, sellerType, excludeDamaged, firstOwnerOnly, and serviceBookOnly still apply. Country is auto-inferred from the URL domain. Leave empty to use the structured filters below.",
+			"description": "Leave empty (default) to use the structured filters below — that is the right path for most users. Paste OLX car listing or search URLs here only when you already have a fully filtered page on OLX (e.g. a model-specific URL like '.../audi/q5/' or a saved search) and want to paginate it directly. When set, the structured filters below (country, brands, query, yearFrom, yearTo, priceFrom, priceTo, filterByCurrency) are ignored — only maxItems, sortBy, sellerType, excludeDamaged, firstOwnerOnly, and serviceBookOnly still apply. Country is auto-inferred from the URL domain.",
 			"sectionCaption": "Input Mode",
 			"sectionDescription": "Choose one input mode: leave Start URLs empty to use the structured filters below (default), or paste OLX URLs to paginate them directly.",
 			"prefill": []

@@ -100,6 +100,12 @@ async def main() -> None:
         # exactly what was discarded from the platform run log.
         if start_urls_raw:
             ignored: list[str] = []
+            # `country` is auto-detected from the URL host in startUrls mode,
+            # so the value the user passed is effectively discarded.  Only
+            # surface it when the user explicitly chose a non-default value;
+            # otherwise the message would be noise for every startUrls run.
+            if actor_input.get('country') and str(actor_input['country']).lower() != 'ro':
+                ignored.append(f"country={actor_input['country']!r}")
             if brands_raw:
                 ignored.append(f'brands={brands_raw!r}')
             if actor_input.get('query'):
@@ -117,7 +123,8 @@ async def main() -> None:
             if ignored:
                 Actor.log.warning(
                     'Start URLs are set, so structured filters are ignored: %s. '
-                    'To use those filters, clear Start URLs in the input.',
+                    'To use those filters, remove the URLs from the Start URLs '
+                    'field.',
                     ', '.join(ignored),
                 )
 
